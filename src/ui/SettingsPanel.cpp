@@ -1,9 +1,30 @@
 #include "SettingsPanel.hpp"
 
+#include <portable-file-dialogs.h>
+
 #include <cstring>
+#include <filesystem>
 #include <imgui.h>
 
+namespace {
+
+std::string defaultPickerPath(const std::string &enginePath) {
+  if (enginePath.empty())
+    return ".";
+
+  std::filesystem::path p(enginePath);
+  if (p.has_parent_path())
+    return p.parent_path().string();
+
+  return enginePath;
+}
+
+} // namespace
+
 namespace XiangQi {
+
+SettingsPanel::SettingsPanel()
+    : IPanel("Settings") {}
 
 void SettingsPanel::syncEngineBuffers(const GameSettings &s) {
   if (engineBufInit_)
@@ -18,8 +39,24 @@ void SettingsPanel::syncEngineBuffers(const GameSettings &s) {
   engineBufInit_ = true;
 }
 
-SettingsPanel::SettingsPanel()
-    : IPanel("Settings") {}
+bool SettingsPanel::browseEnginePath(GameSettings &s) {
+  pfd::open_file picker("Select engine binary",
+                        defaultPickerPath(s.enginePath),
+                        {"Executable files",
+                         "*.exe *.bin *.out *.xq *.uci *.ucci",
+                         "All Files",
+                         "*"},
+                        pfd::opt::none);
+
+  auto files = picker.result();
+  if (files.empty())
+    return false;
+
+  std::strncpy(pathBuf_, files[0].c_str(), sizeof(pathBuf_) - 1);
+  pathBuf_[sizeof(pathBuf_) - 1] = '\0';
+  s.enginePath                   = pathBuf_;
+  return true;
+}
 
 void SettingsPanel::renderVisualSection(GameSettings &s) {
   ImGui::SeparatorText("Board & Pieces");
@@ -81,6 +118,11 @@ void SettingsPanel::renderEngineSection(AppContext &ctx, GameSettings &s) {
 
   if (ImGui::InputText("Engine path", pathBuf_, sizeof(pathBuf_)))
     s.enginePath = pathBuf_;
+
+  ImGui::SameLine();
+  if (ImGui::Button("Browse...", {100, 0}))
+    browseEnginePath(s);
+
   if (ImGui::InputText("Engine name", nameBuf_, sizeof(nameBuf_)))
     s.engineName = nameBuf_;
 
