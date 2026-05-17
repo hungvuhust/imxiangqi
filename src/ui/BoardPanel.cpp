@@ -52,7 +52,11 @@ void BoardPanel::onRender(AppContext &ctx) {
   float  byW   = avail.x / (BoardRenderer::PNG_W / BoardRenderer::PNG_H);
   renderer_.config().boardSize = std::max(200.0f, std::min(byH, byW));
 
-  renderer_.render(ctx.gameState);
+  std::optional<std::string> hintMove;
+  if (ctx.hint.has_value())
+    hintMove = ctx.hint->moveUcci;
+
+  renderer_.render(ctx.gameState, hintMove);
 
   ImGui::End();
   ImGui::PopStyleVar();

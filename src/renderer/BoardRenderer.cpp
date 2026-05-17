@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdio>
 #include <imgui.h>
+#include <optional>
 #include <string>
 
 namespace XiangQi {
@@ -289,11 +290,57 @@ void BoardRenderer::drawCoordinates(ImDrawList *dl, ImVec2 boardOrigin) const {
   }
 }
 
+void BoardRenderer::drawHintArrow(
+    ImDrawList                       *dl,
+    ImVec2                            boardOrigin,
+    const std::optional<std::string> &hintMoveUcci) const {
+  if (!hintMoveUcci.has_value() || hintMoveUcci->size() < 4)
+    return;
+
+  Square from = Square::fromString(hintMoveUcci->substr(0, 2));
+  Square to   = Square::fromString(hintMoveUcci->substr(2, 2));
+  if (!from.valid() || !to.valid())
+    return;
+
+  ImVec2 p0 = squareCenter(from, boardOrigin);
+  ImVec2 p1 = squareCenter(to, boardOrigin);
+
+  ImVec2 d{p1.x - p0.x, p1.y - p0.y};
+  float  len = std::sqrt(d.x * d.x + d.y * d.y);
+  if (len < 1.0f)
+    return;
+
+  ImVec2 n{d.x / len, d.y / len};
+  ImVec2 perp{-n.y, n.x};
+
+  float minCell   = std::min(cellW(), cellH());
+  float headLen   = std::max(12.0f, minCell * 0.34f);
+  float headWidth = headLen * 0.60f;
+  float thick     = std::max(2.0f, minCell * 0.08f);
+
+  ImVec2 tip  = p1;
+  ImVec2 base = {tip.x - n.x * headLen, tip.y - n.y * headLen};
+  ImVec2 l    = {base.x + perp.x * headWidth * 0.5f,
+                 base.y + perp.y * headWidth * 0.5f};
+  ImVec2 r    = {base.x - perp.x * headWidth * 0.5f,
+                 base.y - perp.y * headWidth * 0.5f};
+
+  ImVec2 shaftEnd = {base.x - n.x * 2.0f, base.y - n.y * 2.0f};
+
+  ImU32 lineCol = IM_COL32(255, 190, 40, 235);
+  ImU32 tipCol  = IM_COL32(255, 145, 0, 245);
+
+  dl->AddLine(p0, shaftEnd, lineCol, thick);
+  dl->AddTriangleFilled(tip, l, r, tipCol);
+  dl->AddCircleFilled(p0, std::max(2.0f, thick * 0.8f), lineCol);
+}
+
 // =======================================================================
 //  Main render entry point
 //  Called by BoardPanel::onRender() – no side-panel logic here.
 // =======================================================================
-void BoardRenderer::render(GameState &gameState) {
+void BoardRenderer::render(GameState                        &gameState,
+                           const std::optional<std::string> &hintMoveUcci) {
   ImVec2 boardOrigin = ImGui::GetCursorScreenPos();
 
   // Invisible button covers the entire board PNG area for mouse capture
@@ -311,10 +358,13 @@ void BoardRenderer::render(GameState &gameState) {
   // 3. Coordinates
   drawCoordinates(dl, boardOrigin);
 
-  // 4. Pieces
+  // 4. Hint arrow
+  drawHintArrow(dl, boardOrigin, hintMoveUcci);
+
+  // 5. Pieces
   drawPieces(dl, boardOrigin, gameState.board());
 
-  // 5. Mouse click → GameState
+  // 6. Mouse click → GameState
   if (boardHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
     Square sq = pixelToSquare(ImGui::GetMousePos(), boardOrigin);
     if (sq.valid())

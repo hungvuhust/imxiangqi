@@ -3,6 +3,7 @@
 #include "TextureManager.hpp"
 
 #include <imgui.h>
+#include <optional>
 #include <string>
 
 namespace XiangQi {
@@ -37,9 +38,10 @@ public:
 
   explicit BoardRenderer(const TextureManager &texMgr);
 
-  // Main render call – draws the board + side panel inside the current
-  // ImGui window. Call this inside Begin()/End().
-  void render(GameState &gameState);
+  // Main render call – draws the board inside current ImGui window.
+  // hintMoveUcci format: "a0a1" (optional).
+  void render(GameState                        &gameState,
+              const std::optional<std::string> &hintMoveUcci = std::nullopt);
 
   Config &config() { return config_; }
 
@@ -113,6 +115,9 @@ private:
   void drawPieces(ImDrawList *dl, ImVec2 boardOrigin, const Board &board) const;
   void drawOnePiece(ImDrawList *dl, ImVec2 center, const Piece &piece) const;
   void drawCoordinates(ImDrawList *dl, ImVec2 boardOrigin) const;
+  void drawHintArrow(ImDrawList                       *dl,
+                     ImVec2                            boardOrigin,
+                     const std::optional<std::string> &hintMoveUcci) const;
 
   // Fallback: draw piece as colored circle with text label
   void drawPieceFallback(ImDrawList  *dl,
