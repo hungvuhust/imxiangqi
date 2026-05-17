@@ -77,6 +77,9 @@ private:
   std::vector<std::unique_ptr<IPanel>> panels_;
   bool                                 dockLayoutBuilt_ = false;
 
+  std::chrono::steady_clock::time_point undoDelayUntil_{};
+  static constexpr auto UNDO_RESTART_DELAY = std::chrono::seconds(3);
+
   bool initSDL() {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
       fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
@@ -192,11 +195,20 @@ private:
 
   void consumeEngineOutputs() {
     EngineSuggestion hint;
-    if (engine_.consumePendingHint(hint))
-      lastHint_ = hint;
+    if (engine_.consumePendingHint(hint)) {
+      if (std::chrono::steady_clock::now() >= undoDelayUntil_)
+        lastHint_ = hint;
+    }
 
     std::string moveUcci;
     if (engine_.consumePendingMoveUcci(moveUcci)) {
+      if (std::chrono::steady_clock::now() < undoDelayUntil_) {
+        engine_.log().push(EngineLogDir::Sys,
+                           "ignoring engine move during undo delay: " +
+                               moveUcci);
+        return;
+      }
+
       if (!tryApplyEngineMoveUcci(moveUcci)) {
         engine_.log().push(EngineLogDir::Err,
                            "failed to apply bestmove: " + moveUcci);
@@ -213,6 +225,11 @@ private:
       return;
     if (!isEngineTurn())
       return;
+
+    // Wait if we just did an undo
+    if (std::chrono::steady_clock::now() < undoDelayUntil_)
+      return;
+
     if (!engine_.isReady())
       return;
     if (engine_.isThinking())
@@ -242,6 +259,8 @@ private:
           if (gameState_.canUndo()) {
             gameState_.undoMove();
             engine_.cancelThinking();
+            undoDelayUntil_ =
+                std::chrono::steady_clock::now() + UNDO_RESTART_DELAY;
           }
           break;
         case SDLK_ESCAPE: quit_ = true; break;
@@ -311,6 +330,9 @@ private:
           p->setOpen(open);
       }
       ImGui::Separator();
+      if (ImGui::MenuItem("Save layout as default")) {
+        ImGui::SaveIniSettingsToDisk("imgui.ini");
+      }
       if (ImGui::MenuItem("Reset layout"))
         dockLayoutBuilt_ = false;
       ImGui::EndMenu();
@@ -350,7 +372,9 @@ private:
     ImGui::DockSpace(dockId, {0, 0}, ImGuiDockNodeFlags_PassthruCentralNode);
 
     if (!dockLayoutBuilt_) {
-      buildDefaultDockLayout(dockId);
+      if (!std::filesystem::exists("imgui.ini")) {
+        buildDefaultDockLayout(dockId);
+      }
       dockLayoutBuilt_ = true;
     }
 
