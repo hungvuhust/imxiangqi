@@ -1,0 +1,395 @@
+#include "BoardRenderer.hpp"
+
+#include <cmath>
+#include <cstdio>
+#include <imgui.h>
+#include <string>
+
+namespace XiangQi {
+
+// =======================================================================
+//  Internal colour helpers
+// =======================================================================
+static ImU32 toU32(ImVec4 v) {
+  return IM_COL32(static_cast<int>(v.x * 255),
+                  static_cast<int>(v.y * 255),
+                  static_cast<int>(v.z * 255),
+                  static_cast<int>(v.w * 255));
+}
+
+// =======================================================================
+//  Construction
+// =======================================================================
+BoardRenderer::BoardRenderer(const TextureManager &texMgr)
+    : texMgr_(texMgr) {}
+
+// =======================================================================
+//  Coordinate mapping
+//
+//  The PNG (900×1000) has a 50 px margin on every side.
+//  Intersection (row, col) sits at PNG coords:
+//    png_x = 50 + col * (800/8)  = 50 + col * 100
+//    png_y = 50 + row * (900/9)  = 50 + row * 100
+//
+//  Scaled to the rendered board rect (boardWidth × boardHeight):
+//    pixel_x = boardOrigin.x + png_x * scaleX
+//    pixel_y = boardOrigin.y + png_y * scaleY
+// =======================================================================
+ImVec2 BoardRenderer::squareCenter(Square sq, ImVec2 boardOrigin) const {
+  int displayRow = config_.flipBoard ? (Board::ROWS - 1 - sq.row) : sq.row;
+  int displayCol = config_.flipBoard ? (Board::COLS - 1 - sq.col) : sq.col;
+
+  float png_x = PNG_MARGIN_X + displayCol * (PNG_GRID_W / GRID_COLS_INT);
+  float png_y = PNG_MARGIN_Y + displayRow * (PNG_GRID_H / GRID_ROWS_INT);
+
+  return {boardOrigin.x + png_x * scaleX(), boardOrigin.y + png_y * scaleY()};
+}
+
+Square BoardRenderer::pixelToSquare(ImVec2 pixel, ImVec2 boardOrigin) const {
+  // Inverse: pixel → PNG space → grid coords
+  float png_x = (pixel.x - boardOrigin.x) / scaleX();
+  float png_y = (pixel.y - boardOrigin.y) / scaleY();
+
+  float grid_x = png_x - PNG_MARGIN_X;
+  float grid_y = png_y - PNG_MARGIN_Y;
+
+  float cellW_png = PNG_GRID_W / GRID_COLS_INT; // 100
+  float cellH_png = PNG_GRID_H / GRID_ROWS_INT; // 100
+
+  int displayCol = static_cast<int>(std::round(grid_x / cellW_png));
+  int displayRow = static_cast<int>(std::round(grid_y / cellH_png));
+
+  int col = config_.flipBoard ? (Board::COLS - 1 - displayCol) : displayCol;
+  int row = config_.flipBoard ? (Board::ROWS - 1 - displayRow) : displayRow;
+
+  if (col < 0 || col >= Board::COLS || row < 0 || row >= Board::ROWS)
+    return {};
+  return {static_cast<int8_t>(row), static_cast<int8_t>(col)};
+}
+
+// =======================================================================
+//  Board background
+// =======================================================================
+void BoardRenderer::drawBoard(ImDrawList *dl, ImVec2 boardOrigin) const {
+  const Texture *boardTex = texMgr_.boardTexture();
+  ImVec2         tl       = boardOrigin;
+  ImVec2 br = {boardOrigin.x + boardWidth(), boardOrigin.y + boardHeight()};
+
+  if (boardTex && boardTex->valid()) {
+    dl->AddImage(boardTex->imguiID(), tl, br);
+  } else {
+    // Fallback: plain wood-coloured rect + hand-drawn grid
+    dl->AddRectFilled(tl, br, toU32(config_.colorLight));
+
+    ImU32  lineCol = toU32(config_.colorGridLine);
+    ImVec2 go      = gridOrigin(boardOrigin);
+    float  cw      = cellW();
+    float  ch      = cellH();
+
+    // Horizontal lines
+    for (int r = 0; r < Board::ROWS; ++r) {
+      float y = go.y + r * ch;
+      dl->AddLine({go.x, y}, {go.x + cw * GRID_COLS_INT, y}, lineCol, 1.5f);
+    }
+    // Vertical lines (skip middle segment on inner columns for the river)
+    for (int c = 0; c < Board::COLS; ++c) {
+      float x = go.x + c * cw;
+      if (c == 0 || c == Board::COLS - 1) {
+        dl->AddLine({x, go.y}, {x, go.y + ch * GRID_ROWS_INT}, lineCol, 1.5f);
+      } else {
+        // Top half (rows 0-4)
+        dl->AddLine({x, go.y}, {x, go.y + 4 * ch}, lineCol, 1.5f);
+        // Bottom half (rows 5-9)
+        dl->AddLine({x, go.y + 5 * ch}, {x, go.y + 9 * ch}, lineCol, 1.5f);
+      }
+    }
+    // Palace diagonals – Black (rows 0-2, cols 3-5)
+    {
+      ImVec2 p0 = {go.x + 3 * cw, go.y + 0 * ch};
+      ImVec2 p1 = {go.x + 5 * cw, go.y + 2 * ch};
+      ImVec2 p2 = {go.x + 5 * cw, go.y + 0 * ch};
+      ImVec2 p3 = {go.x + 3 * cw, go.y + 2 * ch};
+      dl->AddLine(p0, p1, lineCol, 1.5f);
+      dl->AddLine(p2, p3, lineCol, 1.5f);
+    }
+    // Palace diagonals – Red (rows 7-9, cols 3-5)
+    {
+      ImVec2 p0 = {go.x + 3 * cw, go.y + 7 * ch};
+      ImVec2 p1 = {go.x + 5 * cw, go.y + 9 * ch};
+      ImVec2 p2 = {go.x + 5 * cw, go.y + 7 * ch};
+      ImVec2 p3 = {go.x + 3 * cw, go.y + 9 * ch};
+      dl->AddLine(p0, p1, lineCol, 1.5f);
+      dl->AddLine(p2, p3, lineCol, 1.5f);
+    }
+  }
+}
+
+// =======================================================================
+//  Highlights  (last move, check, selection, legal destinations)
+// =======================================================================
+void BoardRenderer::drawHighlights(ImDrawList      *dl,
+                                   ImVec2           boardOrigin,
+                                   const GameState &gs) const {
+  const Board &board = gs.board();
+  float        hw    = cellW() * 0.48f; // half-width of highlight rect
+  float        hh    = cellH() * 0.48f;
+
+  auto fillRect = [&](Square sq, ImU32 col) {
+    ImVec2 c = squareCenter(sq, boardOrigin);
+    dl->AddRectFilled({c.x - hw, c.y - hh}, {c.x + hw, c.y + hh}, col);
+  };
+
+  // Last move tint
+  if (!board.history().empty()) {
+    const Move &last    = board.history().back();
+    ImU32       lastCol = toU32(config_.colorLastMove);
+    fillRect(last.from(), lastCol);
+    fillRect(last.to(), lastCol);
+  }
+
+  // King-in-check
+  if (board.isInCheck()) {
+    Square king = board.findKing(board.sideToMove());
+    if (king.valid())
+      fillRect(king, toU32(config_.colorCheck));
+  }
+
+  // Selected piece
+  const Selection &sel = gs.selection();
+  if (sel.phase == SelectionPhase::PieceSelected) {
+    fillRect(sel.square, toU32(config_.colorSelected));
+
+    // Legal destinations
+    for (const auto &m : sel.legalDests) {
+      ImVec2 dc = squareCenter(m.to(), boardOrigin);
+      if (board.at(m.to()).empty()) {
+        // Empty square: small circle at intersection
+        float r = std::min(cellW(), cellH()) * 0.18f;
+        dl->AddCircleFilled(dc, r, toU32(config_.colorLegal));
+      } else {
+        // Capture: ring
+        float r = std::min(cellW(), cellH()) * 0.44f;
+        dl->AddCircle(dc, r, toU32(config_.colorLegal), 24, 3.0f);
+      }
+    }
+  }
+}
+
+// =======================================================================
+//  Piece rendering
+// =======================================================================
+void BoardRenderer::drawPieceFallback(ImDrawList  *dl,
+                                      ImVec2       center,
+                                      float        radius,
+                                      const Piece &piece) const {
+  ImU32 bgColor = (piece.color() == PieceColor::Red)
+                      ? IM_COL32(220, 50, 30, 255)
+                      : IM_COL32(20, 20, 20, 255);
+  ImU32 fgColor = IM_COL32(255, 220, 150, 255);
+  ImU32 rimCol  = IM_COL32(200, 170, 100, 255);
+
+  dl->AddCircleFilled(center, radius, bgColor);
+  dl->AddCircle(center, radius, rimCol, 32, config_.pieceCircleBorderThickness);
+
+  // Chinese character label
+  const char *label = "?";
+  if (piece.color() == PieceColor::Red) {
+    switch (piece.type()) {
+    case PieceType::King: label = "\xe5\xb8\xa5"; break;     // 帥
+    case PieceType::Advisor: label = "\xe4\xbb\x95"; break;  // 仕
+    case PieceType::Elephant: label = "\xe7\x9b\xb8"; break; // 相
+    case PieceType::Knight: label = "\xe9\xa6\xac"; break;   // 馬
+    case PieceType::Rook: label = "\xe8\xbb\x8a"; break;     // 車
+    case PieceType::Cannon: label = "\xe7\x82\xae"; break;   // 炮
+    case PieceType::Pawn: label = "\xe5\x85\xb5"; break;     // 兵
+    default: break;
+    }
+  } else {
+    switch (piece.type()) {
+    case PieceType::King: label = "\xe5\xb0\x87"; break;     // 將
+    case PieceType::Advisor: label = "\xe5\xa3\xab"; break;  // 士
+    case PieceType::Elephant: label = "\xe8\xb1\xa1"; break; // 象
+    case PieceType::Knight: label = "\xe9\xa6\xac"; break;   // 馬
+    case PieceType::Rook: label = "\xe8\xbb\x8a"; break;     // 車
+    case PieceType::Cannon: label = "\xe7\xa0\xb2"; break;   // 砲
+    case PieceType::Pawn: label = "\xe5\x8d\x92"; break;     // 卒
+    default: break;
+    }
+  }
+
+  ImVec2 ts   = ImGui::CalcTextSize(label);
+  ImVec2 tPos = {center.x - ts.x * 0.5f, center.y - ts.y * 0.5f};
+  dl->AddText(tPos, fgColor, label);
+}
+
+void BoardRenderer::drawOnePiece(ImDrawList  *dl,
+                                 ImVec2       center,
+                                 const Piece &piece) const {
+  // Piece sprite is scaled so it fits inside the cell with pieceScale margin.
+  // Use the smaller of cellW/cellH to keep it circular.
+  float halfSz       = std::min(cellW(), cellH()) * config_.pieceScale * 0.5f;
+  const Texture *tex = texMgr_.pieceTexture(piece);
+
+  if (tex && tex->valid()) {
+    ImVec2 tl = {center.x - halfSz, center.y - halfSz};
+    ImVec2 br = {center.x + halfSz, center.y + halfSz};
+    dl->AddImage(tex->imguiID(), tl, br);
+  } else {
+    drawPieceFallback(dl, center, halfSz, piece);
+  }
+}
+
+void BoardRenderer::drawPieces(ImDrawList  *dl,
+                               ImVec2       boardOrigin,
+                               const Board &board) const {
+  for (int r = 0; r < Board::ROWS; ++r)
+    for (int c = 0; c < Board::COLS; ++c) {
+      const Piece &p = board.at(r, c);
+      if (p.empty())
+        continue;
+      Square sq{static_cast<int8_t>(r), static_cast<int8_t>(c)};
+      ImVec2 center = squareCenter(sq, boardOrigin);
+      drawOnePiece(dl, center, p);
+    }
+}
+
+// =======================================================================
+//  Coordinates
+// =======================================================================
+void BoardRenderer::drawCoordinates(ImDrawList *dl, ImVec2 boardOrigin) const {
+  if (!config_.showCoordinates)
+    return;
+
+  ImU32 textCol  = IM_COL32(60, 40, 10, 200);
+  float fontSize = std::min(cellW(), cellH()) * 0.28f;
+  if (fontSize < 9.0f)
+    fontSize = 9.0f;
+
+  ImVec2 go = gridOrigin(boardOrigin);
+
+  // Column labels  a-i  (below the grid)
+  static constexpr const char *colLabels[9] =
+      {"a", "b", "c", "d", "e", "f", "g", "h", "i"};
+  for (int c = 0; c < Board::COLS; ++c) {
+    int   dc = config_.flipBoard ? (Board::COLS - 1 - c) : c;
+    float x  = go.x + c * cellW() - fontSize * 0.3f;
+    float y  = go.y + GRID_ROWS_INT * cellH() + 3.0f;
+    dl->AddText(nullptr, fontSize, {x, y}, textCol, colLabels[dc]);
+  }
+
+  // Row labels  0-9  (left of the grid)
+  for (int r = 0; r < Board::ROWS; ++r) {
+    int  dr   = config_.flipBoard ? (Board::ROWS - 1 - r) : r;
+    int  rank = 9 - dr; // row 0 (Black back rank) = rank 9
+    char buf[4];
+    snprintf(buf, sizeof(buf), "%d", rank);
+    float y = go.y + r * cellH() - fontSize * 0.5f;
+    float x = go.x - cellW() * 0.6f;
+    dl->AddText(nullptr, fontSize, {x, y}, textCol, buf);
+  }
+}
+
+// =======================================================================
+//  Side panel
+// =======================================================================
+void BoardRenderer::renderSidePanel(GameState &gameState) {
+  ImGui::SameLine(0, 16);
+  ImGui::BeginGroup();
+
+  // Game status
+  const char *statusStr = nullptr;
+  switch (gameState.status()) {
+  case GameStatus::RedWins: statusStr = "Red (South) wins!"; break;
+  case GameStatus::BlackWins: statusStr = "Black (North) wins!"; break;
+  case GameStatus::Draw: statusStr = "Draw"; break;
+  default: break;
+  }
+  if (statusStr)
+    ImGui::TextColored({1.0f, 0.45f, 0.1f, 1.0f}, "%s", statusStr);
+
+  // Side to move
+  bool   isRed = (gameState.sideToMove() == PieceColor::Red);
+  ImVec4 turnCol =
+      isRed ? ImVec4{0.95f, 0.35f, 0.2f, 1.f} : ImVec4{0.6f, 0.7f, 1.f, 1.f};
+  ImGui::TextColored(turnCol, "%s's turn", isRed ? "Red" : "Black");
+  if (gameState.board().isInCheck())
+    ImGui::TextColored({1.f, 0.2f, 0.1f, 1.f}, "  CHECK!");
+
+  ImGui::Separator();
+
+  // Buttons
+  if (ImGui::Button("New Game"))
+    gameState.newGame();
+  ImGui::SameLine();
+  if (ImGui::Button("Undo") && gameState.canUndo())
+    gameState.undoMove();
+  ImGui::SameLine();
+  if (ImGui::Button(config_.flipBoard ? "Unflip" : "Flip"))
+    config_.flipBoard = !config_.flipBoard;
+
+  ImGui::Separator();
+  ImGui::Text("History (%zu):", gameState.history().size());
+
+  float panelH = boardHeight() - ImGui::GetCursorPosY() +
+                 ImGui::GetWindowPos().y - ImGui::GetCursorScreenPos().y +
+                 boardHeight();
+  ImGui::BeginChild("##history", {220.f, 0.f}, true);
+  const auto &hist = gameState.history();
+  for (int i = 0; i < static_cast<int>(hist.size()); ++i) {
+    const Move &m      = hist[i];
+    bool        redMov = (m.moved().color() == PieceColor::Red);
+    if (i % 2 == 0) {
+      ImGui::Text("%d.", i / 2 + 1);
+      ImGui::SameLine();
+    }
+    std::string note = m.toUCCI() + (m.isCapture() ? "x" : "");
+    ImGui::TextColored(redMov ? ImVec4{0.9f, 0.3f, 0.2f, 1.f}
+                              : ImVec4{0.55f, 0.65f, 1.f, 1.f},
+                       "%s",
+                       note.c_str());
+    if (i % 2 == 0)
+      ImGui::SameLine();
+  }
+  if (!hist.empty())
+    ImGui::SetScrollHereY(1.0f);
+  ImGui::EndChild();
+
+  ImGui::EndGroup();
+}
+
+// =======================================================================
+//  Main render entry point
+// =======================================================================
+void BoardRenderer::render(GameState &gameState) {
+  ImVec2 boardOrigin = ImGui::GetCursorScreenPos();
+
+  // Invisible button covers the entire board PNG area for mouse capture
+  ImGui::InvisibleButton("##board", {boardWidth(), boardHeight()});
+  bool boardHovered = ImGui::IsItemHovered();
+
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+
+  // 1. Board PNG (or fallback grid)
+  drawBoard(dl, boardOrigin);
+
+  // 2. Highlights (under pieces)
+  drawHighlights(dl, boardOrigin, gameState);
+
+  // 3. Coordinates
+  drawCoordinates(dl, boardOrigin);
+
+  // 4. Pieces
+  drawPieces(dl, boardOrigin, gameState.board());
+
+  // 5. Mouse click
+  if (boardHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    Square sq = pixelToSquare(ImGui::GetMousePos(), boardOrigin);
+    if (sq.valid())
+      gameState.onSquareClicked(sq);
+  }
+
+  // 6. Side panel
+  renderSidePanel(gameState);
+}
+
+} // namespace XiangQi

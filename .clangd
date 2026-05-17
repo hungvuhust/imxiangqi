@@ -1,0 +1,19 @@
+CompileFlags:
+    Add:
+        - -std=c++17
+        - -Werror
+        - -Wall
+        - -Wno-reorder-ctor
+        - -Wno-range-loop-construct
+        - -Wno-unused-variable
+        - -Wno-unused-lambda-capture
+        - -Wno-unused-parameter
+
+# Index:
+#   Background: Skip
+
+# Completion:
+#   AllScopes: No
+
+# Diagnostics:
+#   UnusedIncludes: None
