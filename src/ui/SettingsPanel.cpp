@@ -1,18 +1,29 @@
 #include "SettingsPanel.hpp"
+
+#include <cstring>
 #include <imgui.h>
 
 namespace XiangQi {
 
+void SettingsPanel::syncEngineBuffers(const GameSettings &s) {
+  if (engineBufInit_)
+    return;
+
+  std::strncpy(pathBuf_, s.enginePath.c_str(), sizeof(pathBuf_) - 1);
+  pathBuf_[sizeof(pathBuf_) - 1] = '\0';
+
+  std::strncpy(nameBuf_, s.engineName.c_str(), sizeof(nameBuf_) - 1);
+  nameBuf_[sizeof(nameBuf_) - 1] = '\0';
+
+  engineBufInit_ = true;
+}
+
 SettingsPanel::SettingsPanel()
     : IPanel("Settings") {}
 
-// -----------------------------------------------------------------------
-//  Visual section
-// -----------------------------------------------------------------------
 void SettingsPanel::renderVisualSection(GameSettings &s) {
   ImGui::SeparatorText("Board & Pieces");
 
-  // Theme
   int theme = static_cast<int>(s.theme);
   ImGui::Text("Theme:");
   ImGui::SameLine();
@@ -30,9 +41,6 @@ void SettingsPanel::renderVisualSection(GameSettings &s) {
     ImGui::SliderFloat("Anim speed (ms)", &s.animSpeedMs, 40.f, 400.f, "%.0f");
 }
 
-// -----------------------------------------------------------------------
-//  Highlight colours
-// -----------------------------------------------------------------------
 void SettingsPanel::renderHighlightSection(GameSettings &s) {
   ImGui::SeparatorText("Highlight Colors");
 
@@ -51,10 +59,7 @@ void SettingsPanel::renderHighlightSection(GameSettings &s) {
   editColor("Check", s.colCheck);
 }
 
-// -----------------------------------------------------------------------
-//  Engine section
-// -----------------------------------------------------------------------
-void SettingsPanel::renderEngineSection(GameSettings &s) {
+void SettingsPanel::renderEngineSection(AppContext &ctx, GameSettings &s) {
   ImGui::SeparatorText("Players");
 
   const char *modes[] = {"Human", "Engine"};
@@ -67,19 +72,44 @@ void SettingsPanel::renderEngineSection(GameSettings &s) {
   if (ImGui::Combo("Black (North)##pl", &blk, modes, 2))
     s.blackPlayer = static_cast<PlayerMode>(blk);
 
-  if (s.hasEngine()) {
-    ImGui::SeparatorText("Engine");
-    ImGui::InputText("Engine path", s.enginePath.data(), 256);
-    ImGui::InputText("Engine name", s.engineName.data(), 64);
-    ImGui::SliderInt("Depth", &s.engineDepth, 1, 30);
-    ImGui::SliderInt("Time (ms)", &s.engineTimeMs, 100, 10000);
-    ImGui::Checkbox("Pondering", &s.enginePonder);
-  }
+  if (!s.hasEngine())
+    return;
+
+  syncEngineBuffers(s);
+
+  ImGui::SeparatorText("Engine");
+
+  if (ImGui::InputText("Engine path", pathBuf_, sizeof(pathBuf_)))
+    s.enginePath = pathBuf_;
+  if (ImGui::InputText("Engine name", nameBuf_, sizeof(nameBuf_)))
+    s.engineName = nameBuf_;
+
+  ImGui::SliderInt("Depth", &s.engineDepth, 1, 30);
+  ImGui::SliderInt("Time (ms)", &s.engineTimeMs, 100, 10000);
+  ImGui::Checkbox("Pondering", &s.enginePonder);
+
+  ImGui::SeparatorText("Engine runtime");
+
+  if (ImGui::Button("Start", {90, 0}))
+    ctx.engine.start();
+  ImGui::SameLine();
+  if (ImGui::Button("Stop", {90, 0}))
+    ctx.engine.stop();
+  ImGui::SameLine();
+  if (ImGui::Button("Restart", {90, 0}))
+    ctx.engine.restart();
+
+  ImGui::Text("State: %s", toString(ctx.engine.state()));
+  ImGui::Text("Protocol: %s", toString(ctx.engine.protocol()));
+  ImGui::Text("Running: %s", ctx.engine.isRunning() ? "Yes" : "No");
+  ImGui::Text("Thinking: %s", ctx.engine.isThinking() ? "Yes" : "No");
+
+  if (!ctx.engine.lastError().empty())
+    ImGui::TextColored({1.f, 0.35f, 0.35f, 1.f},
+                       "Error: %s",
+                       ctx.engine.lastError().c_str());
 }
 
-// -----------------------------------------------------------------------
-//  onRender
-// -----------------------------------------------------------------------
 void SettingsPanel::onRender(AppContext &ctx) {
   if (!open_)
     return;
@@ -93,11 +123,10 @@ void SettingsPanel::onRender(AppContext &ctx) {
 
   renderVisualSection(s);
   renderHighlightSection(s);
-  renderEngineSection(s);
+  renderEngineSection(ctx, s);
 
   ImGui::Separator();
 
-  // Reset button with confirmation
   if (!confirmReset_) {
     if (ImGui::Button("Reset to defaults", {-1, 0}))
       confirmReset_ = true;
@@ -105,7 +134,8 @@ void SettingsPanel::onRender(AppContext &ctx) {
     ImGui::TextColored({1, 0.4f, 0.2f, 1}, "Reset all settings?");
     if (ImGui::Button("Yes, reset", {100, 0})) {
       s.reset();
-      confirmReset_ = false;
+      engineBufInit_ = false;
+      confirmReset_  = false;
     }
     ImGui::SameLine();
     if (ImGui::Button("Cancel", {80, 0}))

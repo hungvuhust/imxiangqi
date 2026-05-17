@@ -33,6 +33,30 @@ void ControlPanel::onRender(AppContext &ctx) {
     ctx.undoMove();
   ImGui::EndDisabled();
 
+  // --- Engine -------------------------------------------------------------
+  ImGui::SeparatorText("Engine");
+
+  bool canHint = ctx.settings.hasEngine() && ctx.gameState.isPlaying() &&
+                 ctx.engine.isReady() && !ctx.engine.isThinking();
+  ImGui::BeginDisabled(!canHint);
+  if (ImGui::Button("Hint next move", {-1, 0})) {
+    ctx.engine.requestHint(ctx.gameState);
+  }
+  ImGui::EndDisabled();
+
+  if (ctx.hint.has_value()) {
+    const auto &h = *ctx.hint;
+    ImGui::TextWrapped("Hint: %s", h.moveUcci.c_str());
+    if (h.info.depth >= 0)
+      ImGui::Text("Depth: %d", h.info.depth);
+    if (h.info.hasScoreCp)
+      ImGui::Text("Score cp: %d", h.info.scoreCp);
+    if (h.info.hasMate)
+      ImGui::Text("Mate: %d", h.info.mate);
+    if (!h.info.pv.empty())
+      ImGui::TextWrapped("PV: %s", h.info.pv.c_str());
+  }
+
   // --- View ---------------------------------------------------------------
   ImGui::SeparatorText("View");
 

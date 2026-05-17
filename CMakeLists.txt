@@ -9,6 +9,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(SDL2   REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(GLEW   REQUIRED)
+find_package(Threads REQUIRED)
 
 # ---------- ImGui ----------
 set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/vendor/imgui)
@@ -33,8 +34,14 @@ set(SOURCES
     # renderer
     src/renderer/TextureManager.cpp
     src/renderer/BoardRenderer.cpp
+    # engine
+    src/engine/EngineLog.cpp
+    src/engine/EngineProtocol.cpp
+    src/engine/EngineProcess.cpp
+    src/engine/EngineController.cpp
     # ui panels
     src/ui/BoardPanel.cpp
+    src/ui/EngineLogPanel.cpp
     src/ui/ControlPanel.cpp
     src/ui/StatusPanel.cpp
     src/ui/MoveHistoryPanel.cpp
@@ -58,6 +65,7 @@ target_link_libraries(imxiangqi PRIVATE
     ${SDL2_LIBRARIES}
     OpenGL::GL
     GLEW::GLEW
+    Threads::Threads
     ${CMAKE_DL_LIBS}
 )
 

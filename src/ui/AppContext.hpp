@@ -1,7 +1,9 @@
 #pragma once
 #include "../core/GameSettings.hpp"
 #include "../core/GameState.hpp"
+#include "../engine/EngineController.hpp"
 #include "../renderer/TextureManager.hpp"
+#include <optional>
 
 namespace XiangQi {
 
@@ -19,7 +21,10 @@ namespace XiangQi {
 struct AppContext {
   GameState            &gameState;
   GameSettings         &settings;
+  EngineController     &engine;
   const TextureManager &texMgr;
+
+  std::optional<EngineSuggestion> hint;
 
   // Convenience forwarders so panels don't need to know GameState internals
   void newGame() { gameState.newGame(); }

@@ -11,10 +11,12 @@
 
 #include "core/GameSettings.hpp"
 #include "core/GameState.hpp"
+#include "engine/EngineController.hpp"
 #include "renderer/TextureManager.hpp"
 #include "ui/AppContext.hpp"
 #include "ui/BoardPanel.hpp"
 #include "ui/ControlPanel.hpp"
+#include "ui/EngineLogPanel.hpp"
 #include "ui/IPanel.hpp"
 #include "ui/MoveHistoryPanel.hpp"
 #include "ui/SettingsPanel.hpp"
@@ -24,14 +26,12 @@
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 using namespace XiangQi;
 
-// -----------------------------------------------------------------------
-//  Helpers
-// -----------------------------------------------------------------------
 static std::string resolveAssetsDir(const char *argv0) {
   namespace fs  = std::filesystem;
   fs::path exe  = fs::absolute(fs::path(argv0)).parent_path();
@@ -44,9 +44,6 @@ static std::string resolveAssetsDir(const char *argv0) {
   return (exe / "assets").string();
 }
 
-// -----------------------------------------------------------------------
-//  Application
-// -----------------------------------------------------------------------
 class Application {
 public:
   Application() = default;
@@ -65,30 +62,26 @@ public:
   }
 
 private:
-  // --- SDL / GL -----------------------------------------------------------
   SDL_Window   *window_ = nullptr;
   SDL_GLContext glCtx_  = nullptr;
   bool          quit_   = false;
 
-  // --- Core objects -------------------------------------------------------
-  GameSettings   settings_;
-  GameState      gameState_;
-  TextureManager texMgr_;
+  GameSettings     settings_;
+  GameState        gameState_;
+  TextureManager   texMgr_;
+  EngineController engine_;
 
-  // --- UI -----------------------------------------------------------------
-  // Panels are stored as unique_ptr<IPanel> in a flat list.
-  // Order = default dock layout priority.
+  std::optional<EngineSuggestion> lastHint_;
+
   std::vector<std::unique_ptr<IPanel>> panels_;
+  bool                                 dockLayoutBuilt_ = false;
 
-  // First-frame flag: set up default dock layout once
-  bool dockLayoutBuilt_ = false;
-
-  // -----------------------------------------------------------------------
   bool initSDL() {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
       fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
       return false;
     }
+
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
                         SDL_GL_CONTEXT_PROFILE_CORE);
@@ -115,6 +108,7 @@ private:
       fprintf(stderr, "SDL_GL_CreateContext: %s\n", SDL_GetError());
       return false;
     }
+
     SDL_GL_MakeCurrent(window_, glCtx_);
     SDL_GL_SetSwapInterval(1);
 
@@ -124,16 +118,15 @@ private:
       fprintf(stderr, "glewInit: %s\n", glewGetErrorString(err));
       return false;
     }
+
     return true;
   }
 
-  // -----------------------------------------------------------------------
   bool initImGui() {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
 
     ImGuiIO &io = ImGui::GetIO();
-    // Enable docking + multi-viewport
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
@@ -146,10 +139,10 @@ private:
 
     ImGui_ImplSDL2_InitForOpenGL(window_, glCtx_);
     ImGui_ImplOpenGL3_Init("#version 330");
+
     return true;
   }
 
-  // -----------------------------------------------------------------------
   bool loadAssets(const char *argv0) {
     std::string assets = resolveAssetsDir(argv0);
     printf("[App] Assets dir: %s\n", assets.c_str());
@@ -158,17 +151,74 @@ private:
     return true;
   }
 
-  // -----------------------------------------------------------------------
   bool buildPanels() {
     panels_.emplace_back(std::make_unique<BoardPanel>(texMgr_));
     panels_.emplace_back(std::make_unique<ControlPanel>());
     panels_.emplace_back(std::make_unique<StatusPanel>());
     panels_.emplace_back(std::make_unique<MoveHistoryPanel>());
     panels_.emplace_back(std::make_unique<SettingsPanel>());
+    panels_.emplace_back(std::make_unique<EngineLogPanel>());
     return true;
   }
 
-  // -----------------------------------------------------------------------
+  bool isEngineTurn() const {
+    PieceColor stm = gameState_.sideToMove();
+    if (stm == PieceColor::Red)
+      return settings_.redPlayer == PlayerMode::Engine;
+    if (stm == PieceColor::Black)
+      return settings_.blackPlayer == PlayerMode::Engine;
+    return false;
+  }
+
+  bool tryApplyEngineMoveUcci(const std::string &ucci) {
+    if (ucci.size() < 4)
+      return false;
+
+    Square from = Square::fromString(ucci.substr(0, 2));
+    Square to   = Square::fromString(ucci.substr(2, 2));
+    if (!from.valid() || !to.valid())
+      return false;
+
+    const Piece &moved    = gameState_.board().at(from);
+    const Piece &captured = gameState_.board().at(to);
+    if (moved.empty())
+      return false;
+
+    Move m{from, to, moved, captured};
+    return gameState_.applyMove(m);
+  }
+
+  void consumeEngineOutputs() {
+    EngineSuggestion hint;
+    if (engine_.consumePendingHint(hint))
+      lastHint_ = hint;
+
+    std::string moveUcci;
+    if (engine_.consumePendingMoveUcci(moveUcci)) {
+      if (!tryApplyEngineMoveUcci(moveUcci)) {
+        engine_.log().push(EngineLogDir::Err,
+                           "failed to apply bestmove: " + moveUcci);
+      } else {
+        lastHint_.reset();
+      }
+    }
+  }
+
+  void maybeRequestEngineMove() {
+    if (!settings_.hasEngine())
+      return;
+    if (!gameState_.isPlaying())
+      return;
+    if (!isEngineTurn())
+      return;
+    if (!engine_.isReady())
+      return;
+    if (engine_.isThinking())
+      return;
+
+    engine_.requestMove(gameState_);
+  }
+
   void processEvents() {
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
@@ -182,10 +232,15 @@ private:
 
       if (e.type == SDL_KEYDOWN) {
         switch (e.key.keysym.sym) {
-        case SDLK_n: gameState_.newGame(); break;
+        case SDLK_n:
+          gameState_.newGame();
+          engine_.cancelThinking();
+          break;
         case SDLK_z:
-          if (gameState_.canUndo())
+          if (gameState_.canUndo()) {
             gameState_.undoMove();
+            engine_.cancelThinking();
+          }
           break;
         case SDLK_ESCAPE: quit_ = true; break;
         default: break;
@@ -194,13 +249,16 @@ private:
     }
   }
 
-  // -----------------------------------------------------------------------
   void update() {
-    AppContext ctx{gameState_, settings_, texMgr_};
+    engine_.configure(settings_);
+    engine_.update(gameState_);
+    consumeEngineOutputs();
+    maybeRequestEngineMove();
+
+    AppContext ctx{gameState_, settings_, engine_, texMgr_, lastHint_};
     for (auto &p : panels_) p->onUpdate(ctx);
   }
 
-  // -----------------------------------------------------------------------
   void render() {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL2_NewFrame();
@@ -209,7 +267,7 @@ private:
     renderMainMenuBar();
     renderDockSpace();
 
-    AppContext ctx{gameState_, settings_, texMgr_};
+    AppContext ctx{gameState_, settings_, engine_, texMgr_, lastHint_};
     for (auto &p : panels_)
       if (p->isOpen())
         p->onRender(ctx);
@@ -225,18 +283,19 @@ private:
     SDL_GL_SwapWindow(window_);
   }
 
-  // -----------------------------------------------------------------------
-  //  Main menu bar
-  // -----------------------------------------------------------------------
   void renderMainMenuBar() {
     if (!ImGui::BeginMainMenuBar())
       return;
 
     if (ImGui::BeginMenu("Game")) {
-      if (ImGui::MenuItem("New Game", "N"))
+      if (ImGui::MenuItem("New Game", "N")) {
         gameState_.newGame();
-      if (ImGui::MenuItem("Undo Move", "Z") && gameState_.canUndo())
+        engine_.cancelThinking();
+      }
+      if (ImGui::MenuItem("Undo Move", "Z") && gameState_.canUndo()) {
         gameState_.undoMove();
+        engine_.cancelThinking();
+      }
       ImGui::Separator();
       if (ImGui::MenuItem("Quit", "ESC"))
         quit_ = true;
@@ -251,11 +310,10 @@ private:
       }
       ImGui::Separator();
       if (ImGui::MenuItem("Reset layout"))
-        dockLayoutBuilt_ = false; // force rebuild on next frame
+        dockLayoutBuilt_ = false;
       ImGui::EndMenu();
     }
 
-    // Right-side status text
     const char *turn  = (gameState_.sideToMove() == PieceColor::Red)
                             ? "  Red to move"
                             : "  Black to move";
@@ -267,9 +325,6 @@ private:
     ImGui::EndMainMenuBar();
   }
 
-  // -----------------------------------------------------------------------
-  //  Full-screen DockSpace host window
-  // -----------------------------------------------------------------------
   void renderDockSpace() {
     ImGuiWindowFlags hostFlags =
         ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
@@ -278,7 +333,6 @@ private:
         ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoScrollbar;
 
     ImGuiViewport *vp    = ImGui::GetMainViewport();
-    // Offset by menu bar height
     float          menuH = ImGui::GetFrameHeight();
     ImGui::SetNextWindowPos({vp->Pos.x, vp->Pos.y + menuH});
     ImGui::SetNextWindowSize({vp->Size.x, vp->Size.y - menuH});
@@ -293,7 +347,6 @@ private:
     ImGuiID dockId = ImGui::GetID("MainDock");
     ImGui::DockSpace(dockId, {0, 0}, ImGuiDockNodeFlags_PassthruCentralNode);
 
-    // Build default layout once (first frame)
     if (!dockLayoutBuilt_) {
       buildDefaultDockLayout(dockId);
       dockLayoutBuilt_ = true;
@@ -302,17 +355,6 @@ private:
     ImGui::End();
   }
 
-  // -----------------------------------------------------------------------
-  //  Default dock layout:
-  //
-  //   +-------------------------+----------+
-  //   |                         | Controls |
-  //   |         Board           +----------+
-  //   |                         |  Status  |
-  //   +-------------------------+----------+
-  //   |   Move History          | Settings |
-  //   +-------------------------+----------+
-  // -----------------------------------------------------------------------
   void buildDefaultDockLayout(ImGuiID dockId) {
     ImGui::DockBuilderRemoveNode(dockId);
     ImGui::DockBuilderAddNode(dockId, ImGuiDockNodeFlags_DockSpace);
@@ -320,7 +362,6 @@ private:
     ImGuiViewport *vp = ImGui::GetMainViewport();
     ImGui::DockBuilderSetNodeSize(dockId, vp->Size);
 
-    // Split left (board) / right (sidebar)  70% / 30%
     ImGuiID leftId, rightId;
     ImGui::DockBuilderSplitNode(dockId,
                                 ImGuiDir_Left,
@@ -328,7 +369,6 @@ private:
                                 &leftId,
                                 &rightId);
 
-    // Split left into top (board) / bottom (history)  75% / 25%
     ImGuiID boardId, historyId;
     ImGui::DockBuilderSplitNode(leftId,
                                 ImGuiDir_Up,
@@ -336,7 +376,6 @@ private:
                                 &boardId,
                                 &historyId);
 
-    // Split right into top (controls+status) / bottom (settings)  60% / 40%
     ImGuiID rightTopId, settingsId;
     ImGui::DockBuilderSplitNode(rightId,
                                 ImGuiDir_Up,
@@ -344,7 +383,6 @@ private:
                                 &rightTopId,
                                 &settingsId);
 
-    // Split right-top into controls / status  50% / 50%
     ImGuiID controlsId, statusId;
     ImGui::DockBuilderSplitNode(rightTopId,
                                 ImGuiDir_Up,
@@ -352,22 +390,24 @@ private:
                                 &controlsId,
                                 &statusId);
 
-    // Dock panels by title
     ImGui::DockBuilderDockWindow("Board", boardId);
     ImGui::DockBuilderDockWindow("Move History", historyId);
     ImGui::DockBuilderDockWindow("Controls", controlsId);
     ImGui::DockBuilderDockWindow("Status", statusId);
     ImGui::DockBuilderDockWindow("Settings", settingsId);
+    ImGui::DockBuilderDockWindow("Engine Log", settingsId);
 
     ImGui::DockBuilderFinish(dockId);
   }
 
-  // -----------------------------------------------------------------------
   void shutdown() {
+    engine_.stop();
     panels_.clear();
+
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();
+
     if (glCtx_)
       SDL_GL_DeleteContext(glCtx_);
     if (window_)
@@ -376,7 +416,6 @@ private:
   }
 };
 
-// -----------------------------------------------------------------------
 int main(int argc, char *argv[]) {
   Application app;
   if (!app.init(argc > 0 ? argv[0] : "./imxiangqi"))
