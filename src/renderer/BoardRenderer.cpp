@@ -290,75 +290,8 @@ void BoardRenderer::drawCoordinates(ImDrawList *dl, ImVec2 boardOrigin) const {
 }
 
 // =======================================================================
-//  Side panel
-// =======================================================================
-void BoardRenderer::renderSidePanel(GameState &gameState) {
-  ImGui::SameLine(0, 16);
-  ImGui::BeginGroup();
-
-  // Game status
-  const char *statusStr = nullptr;
-  switch (gameState.status()) {
-  case GameStatus::RedWins: statusStr = "Red (South) wins!"; break;
-  case GameStatus::BlackWins: statusStr = "Black (North) wins!"; break;
-  case GameStatus::Draw: statusStr = "Draw"; break;
-  default: break;
-  }
-  if (statusStr)
-    ImGui::TextColored({1.0f, 0.45f, 0.1f, 1.0f}, "%s", statusStr);
-
-  // Side to move
-  bool   isRed = (gameState.sideToMove() == PieceColor::Red);
-  ImVec4 turnCol =
-      isRed ? ImVec4{0.95f, 0.35f, 0.2f, 1.f} : ImVec4{0.6f, 0.7f, 1.f, 1.f};
-  ImGui::TextColored(turnCol, "%s's turn", isRed ? "Red" : "Black");
-  if (gameState.board().isInCheck())
-    ImGui::TextColored({1.f, 0.2f, 0.1f, 1.f}, "  CHECK!");
-
-  ImGui::Separator();
-
-  // Buttons
-  if (ImGui::Button("New Game"))
-    gameState.newGame();
-  ImGui::SameLine();
-  if (ImGui::Button("Undo") && gameState.canUndo())
-    gameState.undoMove();
-  ImGui::SameLine();
-  if (ImGui::Button(config_.flipBoard ? "Unflip" : "Flip"))
-    config_.flipBoard = !config_.flipBoard;
-
-  ImGui::Separator();
-  ImGui::Text("History (%zu):", gameState.history().size());
-
-  float panelH = boardHeight() - ImGui::GetCursorPosY() +
-                 ImGui::GetWindowPos().y - ImGui::GetCursorScreenPos().y +
-                 boardHeight();
-  ImGui::BeginChild("##history", {220.f, 0.f}, true);
-  const auto &hist = gameState.history();
-  for (int i = 0; i < static_cast<int>(hist.size()); ++i) {
-    const Move &m      = hist[i];
-    bool        redMov = (m.moved().color() == PieceColor::Red);
-    if (i % 2 == 0) {
-      ImGui::Text("%d.", i / 2 + 1);
-      ImGui::SameLine();
-    }
-    std::string note = m.toUCCI() + (m.isCapture() ? "x" : "");
-    ImGui::TextColored(redMov ? ImVec4{0.9f, 0.3f, 0.2f, 1.f}
-                              : ImVec4{0.55f, 0.65f, 1.f, 1.f},
-                       "%s",
-                       note.c_str());
-    if (i % 2 == 0)
-      ImGui::SameLine();
-  }
-  if (!hist.empty())
-    ImGui::SetScrollHereY(1.0f);
-  ImGui::EndChild();
-
-  ImGui::EndGroup();
-}
-
-// =======================================================================
 //  Main render entry point
+//  Called by BoardPanel::onRender() – no side-panel logic here.
 // =======================================================================
 void BoardRenderer::render(GameState &gameState) {
   ImVec2 boardOrigin = ImGui::GetCursorScreenPos();
@@ -381,15 +314,12 @@ void BoardRenderer::render(GameState &gameState) {
   // 4. Pieces
   drawPieces(dl, boardOrigin, gameState.board());
 
-  // 5. Mouse click
+  // 5. Mouse click → GameState
   if (boardHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
     Square sq = pixelToSquare(ImGui::GetMousePos(), boardOrigin);
     if (sq.valid())
       gameState.onSquareClicked(sq);
   }
-
-  // 6. Side panel
-  renderSidePanel(gameState);
 }
 
 } // namespace XiangQi

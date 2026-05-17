@@ -24,12 +24,21 @@ set(IMGUI_SOURCES
 # ---------- Project sources ----------
 set(SOURCES
     src/main.cpp
+    # core
     src/core/Piece.cpp
     src/core/Move.cpp
     src/core/Board.cpp
     src/core/GameState.cpp
+    src/core/GameSettings.cpp
+    # renderer
     src/renderer/TextureManager.cpp
     src/renderer/BoardRenderer.cpp
+    # ui panels
+    src/ui/BoardPanel.cpp
+    src/ui/ControlPanel.cpp
+    src/ui/StatusPanel.cpp
+    src/ui/MoveHistoryPanel.cpp
+    src/ui/SettingsPanel.cpp
 )
 
 add_executable(imxiangqi ${SOURCES} ${IMGUI_SOURCES})
@@ -39,6 +48,9 @@ target_include_directories(imxiangqi PRIVATE
     ${IMGUI_DIR}/backends
     ${CMAKE_SOURCE_DIR}/vendor/stb
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/core
+    ${CMAKE_SOURCE_DIR}/src/renderer
+    ${CMAKE_SOURCE_DIR}/src/ui
     ${SDL2_INCLUDE_DIRS}
 )
 
