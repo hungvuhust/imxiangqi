@@ -13,11 +13,11 @@ std::string GameSettings::serialize() const {
      << "\n";
   ss << "blackPlayer="
      << (blackPlayer == PlayerMode::Engine ? "engine" : "human") << "\n";
-  ss << "enginePath=" << enginePath << "\n";
-  ss << "engineName=" << engineName << "\n";
-  ss << "engineDepth=" << engineDepth << "\n";
-  ss << "engineTimeMs=" << engineTimeMs << "\n";
-  ss << "enginePonder=" << (enginePonder ? "1" : "0") << "\n";
+  ss << "enginePath=" << engine.path << "\n";
+  ss << "engineName=" << engine.name << "\n";
+  ss << "engineDepth=" << engine.depth << "\n";
+  ss << "engineTimeMs=" << engine.timeMs << "\n";
+  ss << "enginePonder=" << (engine.ponder ? "1" : "0") << "\n";
   ss << "theme=" << (theme == BoardTheme::Simple ? "simple" : "classic")
      << "\n";
   ss << "pieceScale=" << pieceScale << "\n";
@@ -66,15 +66,15 @@ GameSettings GameSettings::deserialize(const std::string &data) {
       s.blackPlayer =
           (val == "engine") ? PlayerMode::Engine : PlayerMode::Human;
     else if (key == "enginePath")
-      s.enginePath = val;
+      s.engine.path = val;
     else if (key == "engineName")
-      s.engineName = val;
+      s.engine.name = val;
     else if (key == "engineDepth")
-      s.engineDepth = std::stoi(val);
+      s.engine.depth = std::stoi(val);
     else if (key == "engineTimeMs")
-      s.engineTimeMs = std::stoi(val);
+      s.engine.timeMs = std::stoi(val);
     else if (key == "enginePonder")
-      s.enginePonder = parseBool(val);
+      s.engine.ponder = parseBool(val);
     else if (key == "theme")
       s.theme = (val == "simple") ? BoardTheme::Simple : BoardTheme::Classic;
     else if (key == "pieceScale")

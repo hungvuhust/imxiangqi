@@ -6,57 +6,10 @@
 #include <filesystem>
 #include <imgui.h>
 
-namespace {
-
-std::string defaultPickerPath(const std::string &enginePath) {
-  if (enginePath.empty())
-    return ".";
-
-  std::filesystem::path p(enginePath);
-  if (p.has_parent_path())
-    return p.parent_path().string();
-
-  return enginePath;
-}
-
-} // namespace
-
 namespace XiangQi {
 
 SettingsPanel::SettingsPanel()
     : IPanel("Settings") {}
-
-void SettingsPanel::syncEngineBuffers(const GameSettings &s) {
-  if (engineBufInit_)
-    return;
-
-  std::strncpy(pathBuf_, s.enginePath.c_str(), sizeof(pathBuf_) - 1);
-  pathBuf_[sizeof(pathBuf_) - 1] = '\0';
-
-  std::strncpy(nameBuf_, s.engineName.c_str(), sizeof(nameBuf_) - 1);
-  nameBuf_[sizeof(nameBuf_) - 1] = '\0';
-
-  engineBufInit_ = true;
-}
-
-bool SettingsPanel::browseEnginePath(GameSettings &s) {
-  pfd::open_file picker("Select engine binary",
-                        defaultPickerPath(s.enginePath),
-                        {"Executable files",
-                         "*.exe *.bin *.out *.xq *.uci *.ucci",
-                         "All Files",
-                         "*"},
-                        pfd::opt::none);
-
-  auto files = picker.result();
-  if (files.empty())
-    return false;
-
-  std::strncpy(pathBuf_, files[0].c_str(), sizeof(pathBuf_) - 1);
-  pathBuf_[sizeof(pathBuf_) - 1] = '\0';
-  s.enginePath                   = pathBuf_;
-  return true;
-}
 
 void SettingsPanel::renderVisualSection(GameSettings &s) {
   ImGui::SeparatorText("Board & Pieces");
@@ -96,62 +49,6 @@ void SettingsPanel::renderHighlightSection(GameSettings &s) {
   editColor("Check", s.colCheck);
 }
 
-void SettingsPanel::renderEngineSection(AppContext &ctx, GameSettings &s) {
-  ImGui::SeparatorText("Players");
-
-  const char *modes[] = {"Human", "Engine"};
-
-  int red = static_cast<int>(s.redPlayer);
-  if (ImGui::Combo("Red (South)##pl", &red, modes, 2))
-    s.redPlayer = static_cast<PlayerMode>(red);
-
-  int blk = static_cast<int>(s.blackPlayer);
-  if (ImGui::Combo("Black (North)##pl", &blk, modes, 2))
-    s.blackPlayer = static_cast<PlayerMode>(blk);
-
-  if (!s.hasEngine())
-    return;
-
-  syncEngineBuffers(s);
-
-  ImGui::SeparatorText("Engine");
-
-  if (ImGui::InputText("Engine path", pathBuf_, sizeof(pathBuf_)))
-    s.enginePath = pathBuf_;
-
-  ImGui::SameLine();
-  if (ImGui::Button("Browse...", {100, 0}))
-    browseEnginePath(s);
-
-  if (ImGui::InputText("Engine name", nameBuf_, sizeof(nameBuf_)))
-    s.engineName = nameBuf_;
-
-  ImGui::SliderInt("Depth", &s.engineDepth, 1, 30);
-  ImGui::SliderInt("Time (ms)", &s.engineTimeMs, 100, 10000);
-  ImGui::Checkbox("Pondering", &s.enginePonder);
-
-  ImGui::SeparatorText("Engine runtime");
-
-  if (ImGui::Button("Start", {90, 0}))
-    ctx.engine.start();
-  ImGui::SameLine();
-  if (ImGui::Button("Stop", {90, 0}))
-    ctx.engine.stop();
-  ImGui::SameLine();
-  if (ImGui::Button("Restart", {90, 0}))
-    ctx.engine.restart();
-
-  ImGui::Text("State: %s", toString(ctx.engine.state()));
-  ImGui::Text("Protocol: %s", toString(ctx.engine.protocol()));
-  ImGui::Text("Running: %s", ctx.engine.isRunning() ? "Yes" : "No");
-  ImGui::Text("Thinking: %s", ctx.engine.isThinking() ? "Yes" : "No");
-
-  if (!ctx.engine.lastError().empty())
-    ImGui::TextColored({1.f, 0.35f, 0.35f, 1.f},
-                       "Error: %s",
-                       ctx.engine.lastError().c_str());
-}
-
 void SettingsPanel::onRender(AppContext &ctx) {
   if (!open_)
     return;
@@ -165,7 +62,6 @@ void SettingsPanel::onRender(AppContext &ctx) {
 
   renderVisualSection(s);
   renderHighlightSection(s);
-  renderEngineSection(ctx, s);
 
   ImGui::Separator();
 
@@ -176,8 +72,7 @@ void SettingsPanel::onRender(AppContext &ctx) {
     ImGui::TextColored({1, 0.4f, 0.2f, 1}, "Reset all settings?");
     if (ImGui::Button("Yes, reset", {100, 0})) {
       s.reset();
-      engineBufInit_ = false;
-      confirmReset_  = false;
+      confirmReset_ = false;
     }
     ImGui::SameLine();
     if (ImGui::Button("Cancel", {80, 0}))

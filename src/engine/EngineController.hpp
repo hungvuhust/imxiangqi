@@ -1,21 +1,22 @@
 #pragma once
 
-#include "../core/GameSettings.hpp"
-#include "../core/GameState.hpp"
 #include "EngineLog.hpp"
 #include "EngineProcess.hpp"
 #include "EngineProtocol.hpp"
+#include "EngineSettings.hpp"
 
 #include <optional>
 #include <string>
 
 namespace XiangQi {
 
+class GameState;
+
 class EngineController {
 public:
   EngineController() = default;
 
-  void configure(const GameSettings &settings);
+  void configure(const EngineSettings &settings);
 
   bool start();
   void stop();
@@ -51,7 +52,7 @@ private:
   void handleEngineLine(const std::string &line);
   void applyConfiguredOptions();
 
-  GameSettings settings_{};
+  EngineSettings settings_{};
 
   EngineProcess process_;
   EngineLog     log_;

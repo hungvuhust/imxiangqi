@@ -17,6 +17,7 @@
 #include "ui/BoardPanel.hpp"
 #include "ui/ControlPanel.hpp"
 #include "ui/EngineLogPanel.hpp"
+#include "ui/EngineSettingsPanel.hpp"
 #include "ui/IPanel.hpp"
 #include "ui/MoveHistoryPanel.hpp"
 #include "ui/SettingsPanel.hpp"
@@ -157,6 +158,7 @@ private:
     panels_.emplace_back(std::make_unique<StatusPanel>());
     panels_.emplace_back(std::make_unique<MoveHistoryPanel>());
     panels_.emplace_back(std::make_unique<SettingsPanel>());
+    panels_.emplace_back(std::make_unique<EngineSettingsPanel>());
     panels_.emplace_back(std::make_unique<EngineLogPanel>());
     return true;
   }
@@ -250,7 +252,7 @@ private:
   }
 
   void update() {
-    engine_.configure(settings_);
+    engine_.configure(settings_.engine);
     engine_.update(gameState_);
     consumeEngineOutputs();
     maybeRequestEngineMove();
@@ -395,6 +397,7 @@ private:
     ImGui::DockBuilderDockWindow("Controls", controlsId);
     ImGui::DockBuilderDockWindow("Status", statusId);
     ImGui::DockBuilderDockWindow("Settings", settingsId);
+    ImGui::DockBuilderDockWindow("Engine Settings", settingsId);
     ImGui::DockBuilderDockWindow("Engine Log", settingsId);
 
     ImGui::DockBuilderFinish(dockId);

@@ -1,15 +1,9 @@
 #pragma once
+#include "../engine/EngineSettings.hpp"
+#include "../engine/EngineTypes.hpp"
 #include <string>
 
 namespace XiangQi {
-
-// -----------------------------------------------------------------------
-//  PlayerMode  – who controls each side
-// -----------------------------------------------------------------------
-enum class PlayerMode {
-  Human,  // user clicks on the board
-  Engine, // UCI/UCCI engine process (future)
-};
 
 // -----------------------------------------------------------------------
 //  BoardTheme  – visual preset for the board
@@ -24,7 +18,7 @@ enum class BoardTheme {
 //
 //  Owns all user-configurable state that survives a "New Game":
 //    - who plays Red / Black
-//    - engine command & depth
+//    - engine configuration
 //    - board visual options
 //    - coordinate display
 //
@@ -41,11 +35,7 @@ struct GameSettings {
   // ------------------------------------------------------------------
   //  Engine configuration  (used when PlayerMode == Engine)
   // ------------------------------------------------------------------
-  std::string enginePath   = "";    // path to engine binary
-  std::string engineName   = "";    // display name
-  int         engineDepth  = 15;    // search depth
-  int         engineTimeMs = 3000;  // time per move (ms)
-  bool        enginePonder = false; // pondering on opponent's turn
+  EngineSettings engine;
 
   // ------------------------------------------------------------------
   //  Board visual
@@ -83,7 +73,10 @@ struct GameSettings {
   static GameSettings deserialize(const std::string &data);
 
   // Reset to factory defaults
-  void reset() { *this = GameSettings{}; }
+  void reset() {
+    *this = GameSettings{};
+    engine.reset();
+  }
 };
 
 } // namespace XiangQi

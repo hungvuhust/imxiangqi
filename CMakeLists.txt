@@ -46,6 +46,7 @@ set(SOURCES
     src/ui/StatusPanel.cpp
     src/ui/MoveHistoryPanel.cpp
     src/ui/SettingsPanel.cpp
+    src/ui/EngineSettingsPanel.cpp
 )
 
 add_executable(imxiangqi ${SOURCES} ${IMGUI_SOURCES})

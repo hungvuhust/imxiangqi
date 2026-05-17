@@ -1,17 +1,18 @@
 #include "EngineController.hpp"
 
+#include "../core/GameState.hpp"
 #include <sstream>
 
 namespace XiangQi {
 
-void EngineController::configure(const GameSettings &settings) {
+void EngineController::configure(const EngineSettings &settings) {
   settings_ = settings;
 }
 
 bool EngineController::start() {
   stop();
 
-  if (settings_.enginePath.empty()) {
+  if (settings_.path.empty()) {
     setError("engine path empty");
     return false;
   }
@@ -26,12 +27,12 @@ bool EngineController::start() {
   pendingMoveUcci_.reset();
   lastInfo_.reset();
 
-  if (!process_.start(settings_.enginePath)) {
+  if (!process_.start(settings_.path)) {
     setError("start failed: " + process_.lastError());
     return false;
   }
 
-  log_.push(EngineLogDir::Sys, "engine started: " + settings_.enginePath);
+  log_.push(EngineLogDir::Sys, "engine started: " + settings_.path);
   state_ = EngineState::Handshaking;
 
   sentUcci_ = true;
@@ -136,10 +137,10 @@ bool EngineController::beginSearch(const GameState  &game,
     return false;
 
   std::ostringstream go;
-  if (settings_.engineTimeMs > 0)
-    go << "go movetime " << settings_.engineTimeMs;
+  if (settings_.timeMs > 0)
+    go << "go movetime " << settings_.timeMs;
   else
-    go << "go depth " << settings_.engineDepth;
+    go << "go depth " << settings_.depth;
 
   if (!sendLine(go.str()))
     return false;
@@ -209,12 +210,12 @@ void EngineController::handleEngineLine(const std::string &line) {
 }
 
 void EngineController::applyConfiguredOptions() {
-  if (settings_.enginePonder)
+  if (settings_.ponder)
     sendLine("setoption name Ponder value true");
   else
     sendLine("setoption name Ponder value false");
 
-  if (settings_.engineDepth > 0) {
+  if (settings_.depth > 0) {
     sendLine("setoption name MultiPV value 1");
   }
 }

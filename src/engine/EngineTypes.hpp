@@ -6,6 +6,11 @@
 
 namespace XiangQi {
 
+enum class PlayerMode : uint8_t {
+  Human,  // user clicks on the board
+  Engine, // UCI/UCCI engine process
+};
+
 enum class EngineProtocol : uint8_t {
   Auto,
   UCCI,
