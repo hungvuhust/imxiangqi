@@ -3,6 +3,7 @@
 #include "TextureManager.hpp"
 
 #include <imgui.h>
+#include <optional>
 #include <string>
 
 namespace XiangQi {
@@ -37,11 +38,18 @@ public:
 
   explicit BoardRenderer(const TextureManager &texMgr);
 
-  // Main render call – draws the board + side panel inside the current
-  // ImGui window. Call this inside Begin()/End().
-  void render(GameState &gameState);
+  // Main render call – draws the board inside current ImGui window.
+  // hintMoveUcci format: "a0a1" (optional).
+  void render(GameState                        &gameState,
+              const std::optional<std::string> &hintMoveUcci = std::nullopt);
 
   Config &config() { return config_; }
+
+  // ------------------------------------------------------------------
+  //  PNG layout constants – public so panels can compute aspect ratio
+  // ------------------------------------------------------------------
+  static constexpr float PNG_W = 900.0f;
+  static constexpr float PNG_H = 1000.0f;
 
 private:
   const TextureManager &texMgr_;
@@ -66,8 +74,6 @@ private:
   //    cellW_px    = 100 * scaleX
   //    cellH_px    = 100 * scaleY
   // ------------------------------------------------------------------
-  static constexpr float PNG_W        = 900.0f;
-  static constexpr float PNG_H        = 1000.0f;
   static constexpr float PNG_MARGIN_X = 50.0f; // left & right margin in PNG
   static constexpr float PNG_MARGIN_Y = 50.0f; // top  & bottom margin in PNG
   static constexpr float PNG_GRID_W =
@@ -109,9 +115,9 @@ private:
   void drawPieces(ImDrawList *dl, ImVec2 boardOrigin, const Board &board) const;
   void drawOnePiece(ImDrawList *dl, ImVec2 center, const Piece &piece) const;
   void drawCoordinates(ImDrawList *dl, ImVec2 boardOrigin) const;
-
-  // Side info panel (move history, status)
-  void renderSidePanel(GameState &gameState);
+  void drawHintArrow(ImDrawList                       *dl,
+                     ImVec2                            boardOrigin,
+                     const std::optional<std::string> &hintMoveUcci) const;
 
   // Fallback: draw piece as colored circle with text label
   void drawPieceFallback(ImDrawList  *dl,

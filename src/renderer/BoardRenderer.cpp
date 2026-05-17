@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdio>
 #include <imgui.h>
+#include <optional>
 #include <string>
 
 namespace XiangQi {
@@ -289,78 +290,57 @@ void BoardRenderer::drawCoordinates(ImDrawList *dl, ImVec2 boardOrigin) const {
   }
 }
 
-// =======================================================================
-//  Side panel
-// =======================================================================
-void BoardRenderer::renderSidePanel(GameState &gameState) {
-  ImGui::SameLine(0, 16);
-  ImGui::BeginGroup();
+void BoardRenderer::drawHintArrow(
+    ImDrawList                       *dl,
+    ImVec2                            boardOrigin,
+    const std::optional<std::string> &hintMoveUcci) const {
+  if (!hintMoveUcci.has_value() || hintMoveUcci->size() < 4)
+    return;
 
-  // Game status
-  const char *statusStr = nullptr;
-  switch (gameState.status()) {
-  case GameStatus::RedWins: statusStr = "Red (South) wins!"; break;
-  case GameStatus::BlackWins: statusStr = "Black (North) wins!"; break;
-  case GameStatus::Draw: statusStr = "Draw"; break;
-  default: break;
-  }
-  if (statusStr)
-    ImGui::TextColored({1.0f, 0.45f, 0.1f, 1.0f}, "%s", statusStr);
+  Square from = Square::fromString(hintMoveUcci->substr(0, 2));
+  Square to   = Square::fromString(hintMoveUcci->substr(2, 2));
+  if (!from.valid() || !to.valid())
+    return;
 
-  // Side to move
-  bool   isRed = (gameState.sideToMove() == PieceColor::Red);
-  ImVec4 turnCol =
-      isRed ? ImVec4{0.95f, 0.35f, 0.2f, 1.f} : ImVec4{0.6f, 0.7f, 1.f, 1.f};
-  ImGui::TextColored(turnCol, "%s's turn", isRed ? "Red" : "Black");
-  if (gameState.board().isInCheck())
-    ImGui::TextColored({1.f, 0.2f, 0.1f, 1.f}, "  CHECK!");
+  ImVec2 p0 = squareCenter(from, boardOrigin);
+  ImVec2 p1 = squareCenter(to, boardOrigin);
 
-  ImGui::Separator();
+  ImVec2 d{p1.x - p0.x, p1.y - p0.y};
+  float  len = std::sqrt(d.x * d.x + d.y * d.y);
+  if (len < 1.0f)
+    return;
 
-  // Buttons
-  if (ImGui::Button("New Game"))
-    gameState.newGame();
-  ImGui::SameLine();
-  if (ImGui::Button("Undo") && gameState.canUndo())
-    gameState.undoMove();
-  ImGui::SameLine();
-  if (ImGui::Button(config_.flipBoard ? "Unflip" : "Flip"))
-    config_.flipBoard = !config_.flipBoard;
+  ImVec2 n{d.x / len, d.y / len};
+  ImVec2 perp{-n.y, n.x};
 
-  ImGui::Separator();
-  ImGui::Text("History (%zu):", gameState.history().size());
+  float minCell   = std::min(cellW(), cellH());
+  float headLen   = std::max(12.0f, minCell * 0.34f);
+  float headWidth = headLen * 0.60f;
+  float thick     = std::max(2.0f, minCell * 0.08f);
 
-  float panelH = boardHeight() - ImGui::GetCursorPosY() +
-                 ImGui::GetWindowPos().y - ImGui::GetCursorScreenPos().y +
-                 boardHeight();
-  ImGui::BeginChild("##history", {220.f, 0.f}, true);
-  const auto &hist = gameState.history();
-  for (int i = 0; i < static_cast<int>(hist.size()); ++i) {
-    const Move &m      = hist[i];
-    bool        redMov = (m.moved().color() == PieceColor::Red);
-    if (i % 2 == 0) {
-      ImGui::Text("%d.", i / 2 + 1);
-      ImGui::SameLine();
-    }
-    std::string note = m.toUCCI() + (m.isCapture() ? "x" : "");
-    ImGui::TextColored(redMov ? ImVec4{0.9f, 0.3f, 0.2f, 1.f}
-                              : ImVec4{0.55f, 0.65f, 1.f, 1.f},
-                       "%s",
-                       note.c_str());
-    if (i % 2 == 0)
-      ImGui::SameLine();
-  }
-  if (!hist.empty())
-    ImGui::SetScrollHereY(1.0f);
-  ImGui::EndChild();
+  ImVec2 tip  = p1;
+  ImVec2 base = {tip.x - n.x * headLen, tip.y - n.y * headLen};
+  ImVec2 l    = {base.x + perp.x * headWidth * 0.5f,
+                 base.y + perp.y * headWidth * 0.5f};
+  ImVec2 r    = {base.x - perp.x * headWidth * 0.5f,
+                 base.y - perp.y * headWidth * 0.5f};
 
-  ImGui::EndGroup();
+  ImVec2 shaftEnd = {base.x - n.x * 2.0f, base.y - n.y * 2.0f};
+
+  ImU32 lineCol = IM_COL32(255, 190, 40, 235);
+  ImU32 tipCol  = IM_COL32(255, 145, 0, 245);
+
+  dl->AddLine(p0, shaftEnd, lineCol, thick);
+  dl->AddTriangleFilled(tip, l, r, tipCol);
+  dl->AddCircleFilled(p0, std::max(2.0f, thick * 0.8f), lineCol);
 }
 
 // =======================================================================
 //  Main render entry point
+//  Called by BoardPanel::onRender() – no side-panel logic here.
 // =======================================================================
-void BoardRenderer::render(GameState &gameState) {
+void BoardRenderer::render(GameState                        &gameState,
+                           const std::optional<std::string> &hintMoveUcci) {
   ImVec2 boardOrigin = ImGui::GetCursorScreenPos();
 
   // Invisible button covers the entire board PNG area for mouse capture
@@ -378,18 +358,18 @@ void BoardRenderer::render(GameState &gameState) {
   // 3. Coordinates
   drawCoordinates(dl, boardOrigin);
 
-  // 4. Pieces
+  // 4. Hint arrow
+  drawHintArrow(dl, boardOrigin, hintMoveUcci);
+
+  // 5. Pieces
   drawPieces(dl, boardOrigin, gameState.board());
 
-  // 5. Mouse click
+  // 6. Mouse click → GameState
   if (boardHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
     Square sq = pixelToSquare(ImGui::GetMousePos(), boardOrigin);
     if (sq.valid())
       gameState.onSquareClicked(sq);
   }
-
-  // 6. Side panel
-  renderSidePanel(gameState);
 }
 
 } // namespace XiangQi
