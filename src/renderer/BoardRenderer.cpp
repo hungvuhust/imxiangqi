@@ -426,10 +426,7 @@ void BoardRenderer::drawPvArrows(ImDrawList            *dl,
   const float thick    = std::max(7.0f, minCell * 0.11f);
   const float headLen  = std::max(16.0f, minCell * 0.30f);
   const float headW    = headLen * 0.72f;
-  // Piece radius ≈ minCell*0.44 → shrink shaft ends so arrow doesn't start
-  // inside the piece circle
-  const float pieceR   = minCell * 0.44f;
-  const float fontSize = std::max(10.0f, minCell * 0.17f); // slightly smaller
+  const float fontSize = std::max(10.0f, minCell * 0.17f);
 
   // ------------------------------------------------------------------
   // Per-PV drawing
@@ -469,9 +466,8 @@ void BoardRenderer::drawPvArrows(ImDrawList            *dl,
             : 0.0f;
     ImVec2 sh = {perp.x * laneOff, perp.y * laneOff};
 
-    // Shaft: push start/end inward by pieceR so it touches the rim of
-    // the piece circle rather than burrowing through the centre
-    ImVec2 A   = {p0.x + sh.x + n.x * pieceR, p0.y + sh.y + n.y * pieceR};
+    // Arrow from exact centre to exact centre; arrowhead covers the tip
+    ImVec2 A   = {p0.x + sh.x, p0.y + sh.y};
     ImVec2 tip = {p1.x + sh.x, p1.y + sh.y};
 
     ImVec2 headBase = {tip.x - n.x * headLen, tip.y - n.y * headLen};
