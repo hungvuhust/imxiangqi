@@ -37,6 +37,7 @@ public:
     return activeRequest_ == EngineRequestKind::Analyze;
   }
   const AnalyzeSnapshot &analyzeSnapshot() const { return analyzeSnapshot_; }
+  void clearSnapshot() { analyzeSnapshot_ = AnalyzeSnapshot{}; }
 
   // --- Ponder ---
   bool startPonder(const GameState &game, const std::string &ponderMoveUcci);

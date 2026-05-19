@@ -36,14 +36,15 @@ void ControlPanel::onRender(AppContext &ctx) {
   // --- Engine -------------------------------------------------------------
   ImGui::SeparatorText("Engine");
 
-  bool engineReady = ctx.settings.hasEngine() && ctx.engine.isReady();
+  EngineController &activeEng = ctx.activeEngine();
+  bool engineReady            = ctx.settings.hasEngine() && activeEng.isReady();
 
-  // Hint button
+  // Hint button (dùng engine của bên đang đến lượt)
   bool canHint =
-      engineReady && ctx.gameState.isPlaying() && !ctx.engine.isThinking();
+      engineReady && ctx.gameState.isPlaying() && !activeEng.isThinking();
   ImGui::BeginDisabled(!canHint);
   if (ImGui::Button("Hint next move", {-1, 0}))
-    ctx.engine.requestHint(ctx.gameState);
+    activeEng.requestHint(ctx.gameState);
   ImGui::EndDisabled();
 
   if (ctx.hint.has_value()) {
@@ -61,39 +62,18 @@ void ControlPanel::onRender(AppContext &ctx) {
 
   ImGui::Spacing();
 
-  // Analyze mode toggle
-  bool analyzing  = ctx.engine.isAnalyzing();
-  bool canAnalyze = ctx.engine.isReady() || analyzing;
+  // Analyze mode toggle (dùng engineRed làm engine phân tích chính)
+  bool analyzing  = ctx.engineRed.isAnalyzing();
+  bool canAnalyze = ctx.engineRed.isReady() || analyzing;
   ImGui::BeginDisabled(!canAnalyze);
   if (!analyzing) {
     if (ImGui::Button("Start Analysis", {-1, 0}))
-      ctx.engine.startAnalyze(ctx.gameState);
+      ctx.engineRed.startAnalyze(ctx.gameState);
   } else {
     if (ImGui::Button("Stop Analysis", {-1, 0}))
-      ctx.engine.stopAnalyze();
+      ctx.engineRed.stopAnalyze();
   }
   ImGui::EndDisabled();
-
-  // Live analysis output (MultiPV)
-  if (analyzing || !ctx.engine.analyzeSnapshot().pvLines.empty()) {
-    const auto &snap = ctx.engine.analyzeSnapshot();
-    if (snap.depth >= 0)
-      ImGui::Text("Depth: %d", snap.depth);
-
-    for (const auto &pv : snap.pvLines) {
-      ImGui::PushID(pv.multipv);
-      ImGui::Separator();
-      if (snap.pvLines.size() > 1)
-        ImGui::Text("PV %d", pv.multipv);
-      if (pv.hasScoreCp)
-        ImGui::Text("Score: %+.2f", pv.scoreCp / 100.0f);
-      else if (pv.hasMate)
-        ImGui::Text("Mate in: %d", pv.mate);
-      if (!pv.pv.empty())
-        ImGui::TextWrapped("%s", pv.pv.c_str());
-      ImGui::PopID();
-    }
-  }
 
   // --- View ---------------------------------------------------------------
   ImGui::SeparatorText("View");

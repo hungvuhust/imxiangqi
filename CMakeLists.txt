@@ -31,6 +31,7 @@ set(SOURCES
     src/core/Board.cpp
     src/core/GameState.cpp
     src/core/GameSettings.cpp
+    src/core/MoveNotation.cpp
     # renderer
     src/renderer/TextureManager.cpp
     src/renderer/BoardRenderer.cpp
@@ -45,8 +46,7 @@ set(SOURCES
     src/ui/ControlPanel.cpp
     src/ui/StatusPanel.cpp
     src/ui/MoveHistoryPanel.cpp
-    src/ui/SettingsPanel.cpp
-    src/ui/EngineSettingsPanel.cpp
+    src/ui/SettingsDialog.cpp
 )
 
 add_executable(imxiangqi ${SOURCES} ${IMGUI_SOURCES})

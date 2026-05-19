@@ -13,11 +13,18 @@ std::string GameSettings::serialize() const {
      << "\n";
   ss << "blackPlayer="
      << (blackPlayer == PlayerMode::Engine ? "engine" : "human") << "\n";
-  ss << "enginePath=" << engine.path << "\n";
-  ss << "engineName=" << engine.name << "\n";
-  ss << "engineDepth=" << engine.depth << "\n";
-  ss << "engineTimeMs=" << engine.timeMs << "\n";
-  ss << "enginePonder=" << (engine.ponder ? "1" : "0") << "\n";
+  ss << "engineRedPath=" << engineRed.path << "\n";
+  ss << "engineRedName=" << engineRed.name << "\n";
+  ss << "engineRedDepth=" << engineRed.depth << "\n";
+  ss << "engineRedTimeMs=" << engineRed.timeMs << "\n";
+  ss << "engineRedPonder=" << (engineRed.ponder ? "1" : "0") << "\n";
+  ss << "engineRedMultiPv=" << engineRed.multiPv << "\n";
+  ss << "engineBlackPath=" << engineBlack.path << "\n";
+  ss << "engineBlackName=" << engineBlack.name << "\n";
+  ss << "engineBlackDepth=" << engineBlack.depth << "\n";
+  ss << "engineBlackTimeMs=" << engineBlack.timeMs << "\n";
+  ss << "engineBlackPonder=" << (engineBlack.ponder ? "1" : "0") << "\n";
+  ss << "engineBlackMultiPv=" << engineBlack.multiPv << "\n";
   ss << "theme=" << (theme == BoardTheme::Simple ? "simple" : "classic")
      << "\n";
   ss << "pieceScale=" << pieceScale << "\n";
@@ -65,16 +72,32 @@ GameSettings GameSettings::deserialize(const std::string &data) {
     else if (key == "blackPlayer")
       s.blackPlayer =
           (val == "engine") ? PlayerMode::Engine : PlayerMode::Human;
-    else if (key == "enginePath")
-      s.engine.path = val;
-    else if (key == "engineName")
-      s.engine.name = val;
-    else if (key == "engineDepth")
-      s.engine.depth = std::stoi(val);
-    else if (key == "engineTimeMs")
-      s.engine.timeMs = std::stoi(val);
-    else if (key == "enginePonder")
-      s.engine.ponder = parseBool(val);
+    // Red engine settings (new keys; legacy "engineXxx" also maps to Red)
+    else if (key == "engineRedPath" || key == "enginePath")
+      s.engineRed.path = val;
+    else if (key == "engineRedName" || key == "engineName")
+      s.engineRed.name = val;
+    else if (key == "engineRedDepth" || key == "engineDepth")
+      s.engineRed.depth = std::stoi(val);
+    else if (key == "engineRedTimeMs" || key == "engineTimeMs")
+      s.engineRed.timeMs = std::stoi(val);
+    else if (key == "engineRedPonder" || key == "enginePonder")
+      s.engineRed.ponder = parseBool(val);
+    else if (key == "engineRedMultiPv" || key == "engineMultiPv")
+      s.engineRed.multiPv = std::stoi(val);
+    // Black engine settings
+    else if (key == "engineBlackPath")
+      s.engineBlack.path = val;
+    else if (key == "engineBlackName")
+      s.engineBlack.name = val;
+    else if (key == "engineBlackDepth")
+      s.engineBlack.depth = std::stoi(val);
+    else if (key == "engineBlackTimeMs")
+      s.engineBlack.timeMs = std::stoi(val);
+    else if (key == "engineBlackPonder")
+      s.engineBlack.ponder = parseBool(val);
+    else if (key == "engineBlackMultiPv")
+      s.engineBlack.multiPv = std::stoi(val);
     else if (key == "theme")
       s.theme = (val == "simple") ? BoardTheme::Simple : BoardTheme::Classic;
     else if (key == "pieceScale")

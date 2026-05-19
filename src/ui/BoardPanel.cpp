@@ -56,9 +56,19 @@ void BoardPanel::onRender(AppContext &ctx) {
   if (ctx.hint.has_value())
     hintMove = ctx.hint->moveUcci;
 
+  // Allow mouse input only when the current side-to-move is a Human player
+  PieceColor stm = ctx.gameState.sideToMove();
+  bool       allowInput =
+      (stm == PieceColor::Red ? ctx.settings.redPlayer == PlayerMode::Human
+                              : ctx.settings.blackPlayer == PlayerMode::Human);
+
   // Pass analyze snapshot only when actively analyzing (or snapshot non-empty)
-  const AnalyzeSnapshot &snap = ctx.engine.analyzeSnapshot();
-  renderer_.render(ctx.gameState, hintMove, snap);
+  // Analyze snapshot: dùng engine đang analyze (thường engineRed khi analyze
+  // mode)
+  const AnalyzeSnapshot &snapR = ctx.engineRed.analyzeSnapshot();
+  const AnalyzeSnapshot &snapB = ctx.engineBlack.analyzeSnapshot();
+  const AnalyzeSnapshot &snap  = snapR.pvLines.empty() ? snapB : snapR;
+  renderer_.render(ctx.gameState, hintMove, snap, allowInput);
 
   ImGui::End();
   ImGui::PopStyleVar();

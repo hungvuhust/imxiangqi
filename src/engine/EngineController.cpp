@@ -369,6 +369,7 @@ void EngineController::handleEngineLine(const std::string &line) {
 
   if (activeRequest_ == EngineRequestKind::Move) {
     pendingMoveUcci_ = best->moveUcci;
+    pendingHint_ = *best; // hiện hint arrow trước khi engine áp dụng nước
   } else if (activeRequest_ == EngineRequestKind::Hint) {
     pendingHint_ = *best;
   } else if (activeRequest_ == EngineRequestKind::Analyze) {

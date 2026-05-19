@@ -34,8 +34,11 @@ struct GameSettings {
 
   // ------------------------------------------------------------------
   //  Engine configuration  (used when PlayerMode == Engine)
+  //  engineRed  → used when Red  side is Engine
+  //  engineBlack→ used when Black side is Engine
   // ------------------------------------------------------------------
-  EngineSettings engine;
+  EngineSettings engineRed; // previously "engine"
+  EngineSettings engineBlack;
 
   // ------------------------------------------------------------------
   //  Board visual
@@ -67,6 +70,9 @@ struct GameSettings {
   bool hasEngine() const {
     return redPlayer == PlayerMode::Engine || blackPlayer == PlayerMode::Engine;
   }
+  bool isTwoEngine() const {
+    return redPlayer == PlayerMode::Engine && blackPlayer == PlayerMode::Engine;
+  }
 
   // Simple serialisation to / from INI-style string (for future save/load)
   std::string         serialize() const;
@@ -75,7 +81,8 @@ struct GameSettings {
   // Reset to factory defaults
   void reset() {
     *this = GameSettings{};
-    engine.reset();
+    engineRed.reset();
+    engineBlack.reset();
   }
 };
 

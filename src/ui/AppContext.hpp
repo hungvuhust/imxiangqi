@@ -3,6 +3,7 @@
 #include "../core/GameState.hpp"
 #include "../engine/EngineController.hpp"
 #include "../renderer/TextureManager.hpp"
+#include <imgui.h>
 #include <optional>
 
 namespace XiangQi {
@@ -21,10 +22,18 @@ namespace XiangQi {
 struct AppContext {
   GameState            &gameState;
   GameSettings         &settings;
-  EngineController     &engine;
+  EngineController     &engineRed;   // engine cho bên Đỏ
+  EngineController     &engineBlack; // engine cho bên Đen
   const TextureManager &texMgr;
+  ImFont               *fontVN = nullptr; // Roboto with Vietnamese glyphs
 
   std::optional<EngineSuggestion> hint;
+
+  // Trả về engine của bên đang đến lượt
+  EngineController &activeEngine() {
+    return (gameState.sideToMove() == PieceColor::Red) ? engineRed
+                                                       : engineBlack;
+  }
 
   // Convenience forwarders so panels don't need to know GameState internals
   void newGame() { gameState.newGame(); }

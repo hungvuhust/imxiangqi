@@ -141,14 +141,6 @@ void BoardRenderer::drawHighlights(ImDrawList      *dl,
     dl->AddRectFilled({c.x - hw, c.y - hh}, {c.x + hw, c.y + hh}, col);
   };
 
-  // Last move tint
-  if (!board.history().empty()) {
-    const Move &last    = board.history().back();
-    ImU32       lastCol = toU32(config_.colorLastMove);
-    fillRect(last.from(), lastCol);
-    fillRect(last.to(), lastCol);
-  }
-
   // King-in-check
   if (board.isInCheck()) {
     Square king = board.findKing(board.sideToMove());
@@ -291,6 +283,28 @@ void BoardRenderer::drawCoordinates(ImDrawList *dl, ImVec2 boardOrigin) const {
   }
 }
 
+// ()---------() : 2 vòng tròn 2 đầu + đoạn nối, vẽ dưới quân cờ
+void BoardRenderer::drawLastMoveConnector(ImDrawList      *dl,
+                                          ImVec2           boardOrigin,
+                                          const GameState &gs) const {
+  const auto &hist = gs.board().history();
+  if (hist.empty())
+    return;
+
+  const Move &last = hist.back();
+  ImVec2      A    = squareCenter(last.from(), boardOrigin);
+  ImVec2      B    = squareCenter(last.to(), boardOrigin);
+
+  const ImU32 col = IM_COL32(180, 180, 180, 200);
+  const float circleR =
+      std::min(cellW(), cellH()) * 0.18f; // bán kính vòng tròn
+  const float lineW = circleR * 0.55f; // độ dày đoạn nối < đường kính
+
+  dl->AddLine(A, B, col, lineW);
+  dl->AddCircleFilled(A, circleR, col);
+  dl->AddCircleFilled(B, circleR, col);
+}
+
 void BoardRenderer::drawHintArrow(
     ImDrawList                       *dl,
     ImVec2                            boardOrigin,
@@ -341,7 +355,8 @@ void BoardRenderer::drawHintArrow(
 // =======================================================================
 
 // ---------------------------------------------------------------------------
-// Draw a filled convex 5-pointed star centred at (cx,cy), outer radius r.
+// Draw a filled 5-pointed star centred at (cx,cy), outer radius r.
+// Decomposed into 10 triangles (fan từ tâm) để render đúng với ImGui.
 // ---------------------------------------------------------------------------
 static void drawStar(ImDrawList *dl,
                      float       cx,
@@ -350,6 +365,7 @@ static void drawStar(ImDrawList *dl,
                      ImU32       col,
                      float       innerRatio = 0.42f) {
   static constexpr int N = 5;
+  // Build the 10 alternating outer/inner vertices
   ImVec2               pts[10];
   for (int i = 0; i < N; ++i) {
     float ao = -static_cast<float>(M_PI) / 2.0f +
@@ -359,19 +375,22 @@ static void drawStar(ImDrawList *dl,
     pts[2 * i + 1] = {cx + r * innerRatio * std::cos(ai),
                       cy + r * innerRatio * std::sin(ai)};
   }
-  dl->AddConvexPolyFilled(pts, 10, col);
+  // Fan: 10 triangles from centre
+  ImVec2 centre = {cx, cy};
+  for (int i = 0; i < 10; ++i)
+    dl->AddTriangleFilled(centre, pts[i], pts[(i + 1) % 10], col);
 }
 
 // ---------------------------------------------------------------------------
 // Draw a star outline (no fill).
 // ---------------------------------------------------------------------------
-static void drawStarOutline(ImDrawList *dl,
-                            float       cx,
-                            float       cy,
-                            float       r,
-                            ImU32       col,
-                            float       thickness  = 1.5f,
-                            float       innerRatio = 0.42f) {
+[[maybe_unused]] static void drawStarOutline(ImDrawList *dl,
+                                             float       cx,
+                                             float       cy,
+                                             float       r,
+                                             ImU32       col,
+                                             float       thickness  = 1.5f,
+                                             float       innerRatio = 0.42f) {
   static constexpr int N = 5;
   ImVec2               pts[11]; // closed polyline
   for (int i = 0; i < N; ++i) {
@@ -387,49 +406,62 @@ static void drawStarOutline(ImDrawList *dl,
 }
 
 // ---------------------------------------------------------------------------
-// Tapered arrow: tail = single point at p0, body widens toward tip at p1.
+// Arrow = 2 isosceles triangles sharing a base at splitT along the axis.
 //
-//   tail(p0) ──────────────────────────────── tip(p1)
-//       *                                      /\
-//        \    ← body widens gradually →       /  \
-//         lm ──────────────── lw ────────────/    \
-//         rm ──────────────── rw ────────────\    /
-//        /                                    \  /
-//       *                                      \/
+//   splitT = 0.80  → đuôi chiếm 80%, đầu chiếm 20%
+//   headHW = clamp(len * headRatio, headMinHW, headMaxHW)
+//   tailHW = headHW * 0.5
 //
-// Polygon (6 pts, convex fill):
-//   p0, lm, lw, p1(tip), rw, rm
+//   p0 (tail apex)
+//    *
+//   / \   tailHW
+//  bL───bR   ← shared base at 80%
+//   \   /   headHW
+//    \ /
+//     *
+//    p1 (tip)
 // ---------------------------------------------------------------------------
 static void drawTaperedArrow(ImDrawList *dl,
-                             ImVec2      p0,       // tail (point)
-                             ImVec2      p1,       // tip
-                             float       bodyHW,   // half-width at body
-                             float       headHW,   // half-width at head base
-                             float       headFrac, // fraction of length for head
-                             ImU32       col) {
+                             ImVec2      p0,
+                             ImVec2      p1,
+                             float       headRatio,
+                             float       headMinHW,
+                             float       headMaxHW,
+                             ImU32       col,
+                             float       lengHead = 0.85f) {
   ImVec2 d   = {p1.x - p0.x, p1.y - p0.y};
   float  len = std::sqrt(d.x * d.x + d.y * d.y);
-  if (len < 1.f) return;
+  if (len < 1.f)
+    return;
+
+  float headHW = std::fmax(headMinHW, std::fmin(headMaxHW, len * headRatio));
+  float tailHW = headHW * 0.5f;
 
   ImVec2 n    = {d.x / len, d.y / len};
   ImVec2 perp = {-n.y, n.x};
 
-  // Body mid point: ~40% along
-  float  bodyT  = 0.40f;
-  ImVec2 bodyC  = {p0.x + n.x * len * bodyT,   p0.y + n.y * len * bodyT};
-  // Head base: (1-headFrac) along
-  ImVec2 headB  = {p0.x + n.x * len * (1.f - headFrac),
-                   p0.y + n.y * len * (1.f - headFrac)};
+  // Shared base at 85% — đầu mũi tên chỉ chiếm 15% cuối
+  ImVec2 B = {p0.x + n.x * len * lengHead, p0.y + n.y * len * lengHead};
 
-  ImVec2 pts[6];
-  pts[0] = p0;   // tail point
-  pts[1] = {bodyC.x + perp.x * bodyHW, bodyC.y + perp.y * bodyHW};   // lm
-  pts[2] = {headB.x + perp.x * headHW, headB.y + perp.y * headHW};   // lw
-  pts[3] = p1;   // tip
-  pts[4] = {headB.x - perp.x * headHW, headB.y - perp.y * headHW};   // rw
-  pts[5] = {bodyC.x - perp.x * bodyHW, bodyC.y - perp.y * bodyHW};   // rm
+  ImVec2 bL_tail = {B.x + perp.x * tailHW, B.y + perp.y * tailHW};
+  ImVec2 bR_tail = {B.x - perp.x * tailHW, B.y - perp.y * tailHW};
+  ImVec2 bL_head = {B.x + perp.x * headHW, B.y + perp.y * headHW};
+  ImVec2 bR_head = {B.x - perp.x * headHW, B.y - perp.y * headHW};
 
-  dl->AddConvexPolyFilled(pts, 6, col);
+  const ImU32 white    = IM_COL32(255, 255, 255, 200);
+  const float outlineW = 1.5f;
+
+  // Fill
+  dl->AddTriangleFilled(p0, bL_tail, bR_tail, col);
+  dl->AddTriangleFilled(bL_head, p1, bR_head, col);
+
+  // Outline trắng — 6 cạnh ngoài, bỏ 2 đáy chung bên trong
+  dl->AddLine(p0, bL_tail, white, outlineW);      // đuôi trái
+  dl->AddLine(p0, bR_tail, white, outlineW);      // đuôi phải
+  dl->AddLine(bL_tail, bL_head, white, outlineW); // nối trái
+  dl->AddLine(bR_tail, bR_head, white, outlineW); // nối phải
+  dl->AddLine(p1, bL_head, white, outlineW);      // đầu trái
+  dl->AddLine(p1, bR_head, white, outlineW);      // đầu phải
 }
 
 void BoardRenderer::drawPvArrows(ImDrawList            *dl,
@@ -439,15 +471,17 @@ void BoardRenderer::drawPvArrows(ImDrawList            *dl,
     return;
 
   // Colour: red side → red, black side → blue
-  const int R = snap.redToMove ? 210 : 65;
-  const int G = snap.redToMove ? 55  : 125;
-  const int B = snap.redToMove ? 55  : 220;
-  auto mkCol = [&](int a) -> ImU32 { return IM_COL32(R, G, B, a); };
+  const int R     = snap.redToMove ? 210 : 65;
+  const int G     = snap.redToMove ? 55 : 125;
+  const int B     = snap.redToMove ? 55 : 220;
+  auto      mkCol = [&](int a) -> ImU32 { return IM_COL32(R, G, B, a); };
 
   // Best PV
   auto scoreOf = [](const PvLine &pv) -> int {
-    if (pv.hasMate)    return 100000 - std::abs(pv.mate) * 10;
-    if (pv.hasScoreCp) return pv.scoreCp;
+    if (pv.hasMate)
+      return 100000 - std::abs(pv.mate) * 10;
+    if (pv.hasScoreCp)
+      return pv.scoreCp;
     return -999999;
   };
   int bestIdx = 0;
@@ -456,36 +490,40 @@ void BoardRenderer::drawPvArrows(ImDrawList            *dl,
       bestIdx = i;
 
   // Sizing
-  const float minCell  = std::min(cellW(), cellH());
-  const float bodyHW   = std::max(4.0f,  minCell * 0.065f); // body half-width
-  const float headHW   = std::max(9.0f,  minCell * 0.145f); // head half-width
-  const float headFrac = 0.26f;                              // head occupies last 26%
-  const float badgeR   = std::max(10.0f, minCell * 0.160f);
-  const float fontSize = std::max(9.0f,  minCell * 0.145f);
+  const float minCell   = std::min(cellW(), cellH());
+  // headHW = len * headRatio, clamped to [headMinHW, headMaxHW]
+  const float headRatio = 0.20f; // 20% of arrow length
+  const float headMinHW = minCell * 0.15f;
+  const float headMaxHW = minCell * 0.25f;
+  const float badgeR    = minCell * 0.25f;
+  const float fontSize  = minCell * 0.12f;
 
   for (int idx = 0; idx < static_cast<int>(snap.pvLines.size()); ++idx) {
     const PvLine &pv     = snap.pvLines[idx];
     const bool    isBest = (idx == bestIdx);
 
-    if (pv.pv.empty()) continue;
+    if (pv.pv.empty())
+      continue;
     std::string tok = pv.pv.substr(0, pv.pv.find(' '));
-    if (tok.size() < 4) continue;
+    if (tok.size() < 4)
+      continue;
 
     Square from = Square::fromString(tok.substr(0, 2));
     Square to   = Square::fromString(tok.substr(2, 2));
-    if (!from.valid() || !to.valid()) continue;
+    if (!from.valid() || !to.valid())
+      continue;
 
     ImVec2 p0 = squareCenter(from, boardOrigin);
-    ImVec2 p1 = squareCenter(to,   boardOrigin);
+    ImVec2 p1 = squareCenter(to, boardOrigin);
 
-    int alpha = isBest ? 195 : 125;
-    drawTaperedArrow(dl, p0, p1, bodyHW, headHW, headFrac, mkCol(alpha));
+    int alpha = isBest ? 200 : 175;
+    drawTaperedArrow(dl, p0, p1, headRatio, headMinHW, headMaxHW, mkCol(alpha));
 
     // Badge at ~38% along the full arrow
     ImVec2 d  = {p1.x - p0.x, p1.y - p0.y};
     ImVec2 bp = {p0.x + d.x * 0.38f, p0.y + d.y * 0.38f};
 
-    ImU32 bgCol  = IM_COL32(15, 15, 15, 210);
+    ImU32 bgCol  = IM_COL32(20, 20, 20, 210);
     ImU32 rimCol = mkCol(isBest ? 250 : 185);
 
     dl->AddCircleFilled(bp, badgeR, bgCol);
@@ -499,7 +537,7 @@ void BoardRenderer::drawPvArrows(ImDrawList            *dl,
       if (pv.hasMate)
         snprintf(label, sizeof(label), "M%d", pv.mate);
       else if (pv.hasScoreCp)
-        snprintf(label, sizeof(label), "%+.0f", pv.scoreCp / 100.0f);
+        snprintf(label, sizeof(label), "%+.2f", pv.scoreCp / 100.0f);
       else
         snprintf(label, sizeof(label), "?");
 
@@ -517,7 +555,8 @@ void BoardRenderer::drawPvArrows(ImDrawList            *dl,
 // =======================================================================
 void BoardRenderer::render(GameState                        &gameState,
                            const std::optional<std::string> &hintMoveUcci,
-                           const AnalyzeSnapshot            &analyzeSnapshot) {
+                           const AnalyzeSnapshot            &analyzeSnapshot,
+                           bool                              allowInput) {
   ImVec2 boardOrigin = ImGui::GetCursorScreenPos();
 
   // Invisible button covers the entire board PNG area for mouse capture
@@ -532,20 +571,24 @@ void BoardRenderer::render(GameState                        &gameState,
   // 2. Highlights (under pieces)
   drawHighlights(dl, boardOrigin, gameState);
 
-  // 3. Coordinates
+  // 3. Last-move connector: ()---------() dưới quân cờ
+  drawLastMoveConnector(dl, boardOrigin, gameState);
+
+  // 4. Coordinates
   drawCoordinates(dl, boardOrigin);
 
-  // 4. Hint arrow (under pieces)
+  // 5. Hint arrow (under pieces)
   drawHintArrow(dl, boardOrigin, hintMoveUcci);
 
-  // 5. Pieces
+  // 6. Pieces
   drawPieces(dl, boardOrigin, gameState.board());
 
-  // 6. PV arrows on top of pieces so they are always visible
+  // 7. PV arrows on top of pieces so they are always visible
   drawPvArrows(dl, boardOrigin, analyzeSnapshot);
 
-  // 7. Mouse click → GameState
-  if (boardHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+  // 8. Mouse click → GameState (only when it's a human's turn)
+  if (allowInput && boardHovered &&
+      ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
     Square sq = pixelToSquare(ImGui::GetMousePos(), boardOrigin);
     if (sq.valid())
       gameState.onSquareClicked(sq);

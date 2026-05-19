@@ -17,15 +17,15 @@
 #include "ui/BoardPanel.hpp"
 #include "ui/ControlPanel.hpp"
 #include "ui/EngineLogPanel.hpp"
-#include "ui/EngineSettingsPanel.hpp"
 #include "ui/IPanel.hpp"
 #include "ui/MoveHistoryPanel.hpp"
-#include "ui/SettingsPanel.hpp"
+#include "ui/SettingsDialog.hpp"
 #include "ui/StatusPanel.hpp"
 
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <string>
@@ -53,6 +53,7 @@ public:
   bool init(const char *argv0) {
     if (!initSDL() || !initImGui() || !loadAssets(argv0) || !buildPanels())
       return false;
+    loadSettings();
     registerGameEventListener();
     return true;
   }
@@ -73,18 +74,36 @@ private:
   GameSettings     settings_;
   GameState        gameState_;
   TextureManager   texMgr_;
-  EngineController engine_;
+  EngineController engineRed_;   // engine dùng cho bên Đỏ
+  EngineController engineBlack_; // engine dùng cho bên Đen
 
   std::optional<EngineSuggestion> lastHint_;
 
   std::vector<std::unique_ptr<IPanel>> panels_;
   bool                                 dockLayoutBuilt_ = false;
+  SettingsDialog                       settingsDialog_;
+  ImFont                              *fontVN_ = nullptr;
 
   std::chrono::steady_clock::time_point undoDelayUntil_{};
   static constexpr auto UNDO_RESTART_DELAY = std::chrono::seconds(3);
 
-  int  gameEventListenerId_   = -1;
-  bool pendingAnalyzeRestart_ = false;
+  int  gameEventListenerId_        = -1;
+  bool pendingAnalyzeRestartRed_   = false;
+  bool pendingAnalyzeRestartBlack_ = false;
+
+  // Khi engine mode: giữ nước đi lại 500ms để hint arrow hiển thị trước
+  std::string                           pendingEngineMove_;
+  std::chrono::steady_clock::time_point pendingEngineMoveAt_{};
+
+  // Trả về engine đang đến lượt (theo sideToMove)
+  EngineController &activeEngine() {
+    return (gameState_.sideToMove() == PieceColor::Red) ? engineRed_
+                                                        : engineBlack_;
+  }
+  // Trả về engine của bên cụ thể
+  EngineController &engineFor(PieceColor c) {
+    return (c == PieceColor::Red) ? engineRed_ : engineBlack_;
+  }
 
   bool initSDL() {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
@@ -158,6 +177,29 @@ private:
     printf("[App] Assets dir: %s\n", assets.c_str());
     if (!texMgr_.loadAll(assets))
       fprintf(stderr, "[App] Warning: some textures failed; using fallback.\n");
+
+    // Load Roboto with Vietnamese glyph ranges
+    std::string  fontPath = assets + "/fonts/Roboto-Regular.ttf";
+    ImGuiIO     &io       = ImGui::GetIO();
+    // Build a glyph range covering Latin + Vietnamese
+    ImFontConfig cfg;
+    cfg.OversampleH               = 2;
+    cfg.OversampleV               = 2;
+    static const ImWchar ranges[] = {
+        0x0020, 0x00FF, // Basic Latin + Latin Supplement
+        0x0102, 0x0103, // Vietnamese
+        0x0110, 0x0111, 0x0128, 0x0129, 0x0168, 0x0169, 0x01A0,
+        0x01A1, 0x01AF, 0x01B0, 0x1EA0, 0x1EF9, // Vietnamese extended block
+        0x2013, 0x2014,                         // em/en dash
+        0,
+    };
+    fontVN_ =
+        io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 14.0f, &cfg, ranges);
+    if (!fontVN_)
+      fprintf(stderr,
+              "[App] Warning: failed to load Roboto font from %s\n",
+              fontPath.c_str());
+
     return true;
   }
 
@@ -166,8 +208,7 @@ private:
     panels_.emplace_back(std::make_unique<ControlPanel>());
     panels_.emplace_back(std::make_unique<StatusPanel>());
     panels_.emplace_back(std::make_unique<MoveHistoryPanel>());
-    panels_.emplace_back(std::make_unique<SettingsPanel>());
-    panels_.emplace_back(std::make_unique<EngineSettingsPanel>());
+
     panels_.emplace_back(std::make_unique<EngineLogPanel>());
     return true;
   }
@@ -185,21 +226,34 @@ private:
 
     case GameEventKind::MoveMade:
       lastHint_.reset();
+      engineRed_.clearSnapshot();
+      engineBlack_.clearSnapshot();
       // If analyze mode is active, stop and re-queue restart on new position
-      if (engine_.isAnalyzing()) {
-        engine_.stopAnalyze(); // sends "stop"; engine will reply with bestmove
-        pendingAnalyzeRestart_ = true; // re-start once Ready
+      for (auto *eng : {&engineRed_, &engineBlack_}) {
+        if (eng->isAnalyzing()) {
+          eng->stopAnalyze();
+          if (eng == &engineRed_)
+            pendingAnalyzeRestartRed_ = true;
+          else
+            pendingAnalyzeRestartBlack_ = true;
+        }
       }
       // Ponder / engine-move requests are handled by maybeRequestEngineMove()
       break;
 
     case GameEventKind::MoveUndone: {
       lastHint_.reset();
-      bool wasAnalyzing = engine_.isAnalyzing();
-      engine_.stopAnalyze();
-      engine_.stopPonder();
-      engine_.cancelThinking();
-      pendingAnalyzeRestart_ = wasAnalyzing;
+      pendingEngineMove_.clear();
+      bool wasRedAnalyzing   = engineRed_.isAnalyzing();
+      bool wasBlackAnalyzing = engineBlack_.isAnalyzing();
+      for (auto *eng : {&engineRed_, &engineBlack_}) {
+        eng->clearSnapshot();
+        eng->stopAnalyze();
+        eng->stopPonder();
+        eng->cancelThinking();
+      }
+      pendingAnalyzeRestartRed_   = wasRedAnalyzing;
+      pendingAnalyzeRestartBlack_ = wasBlackAnalyzing;
       undoDelayUntil_ = std::chrono::steady_clock::now() + UNDO_RESTART_DELAY;
       break;
     }
@@ -207,19 +261,29 @@ private:
     case GameEventKind::GameReset:
     case GameEventKind::FenLoaded: {
       lastHint_.reset();
-      bool wasAnalyzing = engine_.isAnalyzing();
-      engine_.stopAnalyze();
-      engine_.stopPonder();
-      engine_.cancelThinking();
-      pendingAnalyzeRestart_ = wasAnalyzing;
+      pendingEngineMove_.clear();
+      bool wasRedAnalyzing   = engineRed_.isAnalyzing();
+      bool wasBlackAnalyzing = engineBlack_.isAnalyzing();
+      for (auto *eng : {&engineRed_, &engineBlack_}) {
+        eng->clearSnapshot();
+        eng->stopAnalyze();
+        eng->stopPonder();
+        eng->cancelThinking();
+      }
+      pendingAnalyzeRestartRed_   = wasRedAnalyzing;
+      pendingAnalyzeRestartBlack_ = wasBlackAnalyzing;
       break;
     }
 
     case GameEventKind::GameOver:
-      engine_.stopAnalyze();
-      engine_.stopPonder();
-      engine_.cancelThinking();
-      pendingAnalyzeRestart_ = false;
+      for (auto *eng : {&engineRed_, &engineBlack_}) {
+        eng->clearSnapshot();
+        eng->stopAnalyze();
+        eng->stopPonder();
+        eng->cancelThinking();
+      }
+      pendingAnalyzeRestartRed_   = false;
+      pendingAnalyzeRestartBlack_ = false;
       break;
     }
   }
@@ -251,56 +315,73 @@ private:
     return gameState_.applyMove(m);
   }
 
+  // Consume outputs từ cả 2 engine; chỉ engine đang đến lượt mới sinh move
   void consumeEngineOutputs() {
-    EngineSuggestion hint;
-    if (engine_.consumePendingHint(hint)) {
-      if (std::chrono::steady_clock::now() >= undoDelayUntil_)
-        lastHint_ = hint;
-    }
+    auto now = std::chrono::steady_clock::now();
 
-    std::string moveUcci;
-    if (engine_.consumePendingMoveUcci(moveUcci)) {
-      if (std::chrono::steady_clock::now() < undoDelayUntil_) {
-        engine_.log().push(EngineLogDir::Sys,
-                           "ignoring engine move during undo delay: " +
-                               moveUcci);
-        return;
+    for (auto *eng : {&engineRed_, &engineBlack_}) {
+      EngineSuggestion hint;
+      if (eng->consumePendingHint(hint)) {
+        if (now >= undoDelayUntil_)
+          lastHint_ = hint;
       }
 
+      std::string moveUcci;
+      if (eng->consumePendingMoveUcci(moveUcci)) {
+        if (now < undoDelayUntil_) {
+          eng->log().push(EngineLogDir::Sys,
+                          "ignoring engine move during undo delay: " +
+                              moveUcci);
+          continue;
+        }
+        // Lưu pending, delay 500ms để hint arrow hiển thị trước khi apply
+        pendingEngineMove_   = moveUcci;
+        pendingEngineMoveAt_ = now + std::chrono::milliseconds(500);
+      }
+    }
+
+    // Flush pending move sau delay
+    if (!pendingEngineMove_.empty() && now >= pendingEngineMoveAt_) {
+      std::string moveUcci = pendingEngineMove_;
+      pendingEngineMove_.clear();
+
+      // Lấy engine của bên đang đến lượt TRƯỚC khi apply (bên vừa tính xong)
+      EngineController &justMovedEngine = activeEngine();
+
       if (!tryApplyEngineMoveUcci(moveUcci)) {
-        engine_.log().push(EngineLogDir::Err,
-                           "failed to apply bestmove: " + moveUcci);
+        justMovedEngine.log().push(EngineLogDir::Err,
+                                   "failed to apply bestmove: " + moveUcci);
       } else {
         lastHint_.reset();
-        // After engine plays, try to start pondering on opponent's turn
-        maybeStartPonder(moveUcci);
+        // Sau apply, sideToMove đã đổi — maybeStartPonder sẽ dùng
+        // activeEngine() mới
+        maybeStartPonder(justMovedEngine, moveUcci);
       }
     }
   }
 
-  // Start pondering: engine already played moveUcci, we guess the opponent's
-  // next move by asking for a hint-like search, then pass the ponder move.
-  // Simplified: we re-use the last bestmove's ponder move if available.
-  void maybeStartPonder(const std::string & /*engineMoveUcci*/) {
-    if (!settings_.engine.ponder)
-      return;
-    if (!settings_.hasEngine())
+  // Pondering: engine vừa đi xong, ta gợi ý ponder cho engine đối thủ
+  void maybeStartPonder(EngineController &justMovedEng,
+                        const std::string & /*engineMoveUcci*/) {
+    // Bên vừa đi xong → sideToMove đã đổi sang đối thủ
+    EngineController     &opponentEng = activeEngine();
+    const EngineSettings &opponentSettings =
+        (gameState_.sideToMove() == PieceColor::Red) ? settings_.engineRed
+                                                     : settings_.engineBlack;
+
+    if (!opponentSettings.ponder)
       return;
     if (!gameState_.isPlaying())
       return;
-    if (isEngineTurn()) // still engine's turn after applying move? shouldn't
-                        // happen
-      return;
-    if (!engine_.isReady())
+    if (!opponentEng.isReady())
       return;
 
-    // Extract ponder move from last info's PV (first token after engine move)
-    if (engine_.lastInfo() && !engine_.lastInfo()->pv.empty()) {
-      const std::string &pv         = engine_.lastInfo()->pv;
-      // PV starts with the ponder move (opponent's expected reply)
+    // Extract ponder move từ PV của engine vừa đi
+    if (justMovedEng.lastInfo() && !justMovedEng.lastInfo()->pv.empty()) {
+      const std::string &pv         = justMovedEng.lastInfo()->pv;
       std::string        ponderMove = pv.substr(0, pv.find(' '));
       if (!ponderMove.empty())
-        engine_.startPonder(gameState_, ponderMove);
+        opponentEng.startPonder(gameState_, ponderMove);
     }
   }
 
@@ -316,19 +397,20 @@ private:
     if (std::chrono::steady_clock::now() < undoDelayUntil_)
       return;
 
+    EngineController &eng = activeEngine();
+
     // If we are pondering and the opponent just played, check ponderhit
-    if (engine_.isPondering()) {
-      // Opponent has moved — send ponderhit to convert ponder into real search
-      engine_.sendPonderHit();
+    if (eng.isPondering()) {
+      eng.sendPonderHit();
       return;
     }
 
-    if (!engine_.isReady())
+    if (!eng.isReady())
       return;
-    if (engine_.isThinking())
+    if (eng.isThinking())
       return;
 
-    engine_.requestMove(gameState_);
+    eng.requestMove(gameState_);
   }
 
   void processEvents() {
@@ -361,19 +443,32 @@ private:
   }
 
   void update() {
-    engine_.configure(settings_.engine);
-    engine_.update(gameState_);
+    engineRed_.configure(settings_.engineRed);
+    engineRed_.update(gameState_);
+    engineBlack_.configure(settings_.engineBlack);
+    engineBlack_.update(gameState_);
+
     consumeEngineOutputs();
 
     // Restart analyze once engine returns to Ready after a position change
-    if (pendingAnalyzeRestart_ && engine_.isReady()) {
-      pendingAnalyzeRestart_ = false;
-      engine_.startAnalyze(gameState_);
+    if (pendingAnalyzeRestartRed_ && engineRed_.isReady()) {
+      pendingAnalyzeRestartRed_ = false;
+      engineRed_.startAnalyze(gameState_);
+    }
+    if (pendingAnalyzeRestartBlack_ && engineBlack_.isReady()) {
+      pendingAnalyzeRestartBlack_ = false;
+      engineBlack_.startAnalyze(gameState_);
     }
 
     maybeRequestEngineMove();
 
-    AppContext ctx{gameState_, settings_, engine_, texMgr_, lastHint_};
+    AppContext ctx{gameState_,
+                   settings_,
+                   engineRed_,
+                   engineBlack_,
+                   texMgr_,
+                   fontVN_,
+                   lastHint_};
     for (auto &p : panels_) p->onUpdate(ctx);
   }
 
@@ -385,10 +480,18 @@ private:
     renderMainMenuBar();
     renderDockSpace();
 
-    AppContext ctx{gameState_, settings_, engine_, texMgr_, lastHint_};
+    AppContext ctx{gameState_,
+                   settings_,
+                   engineRed_,
+                   engineBlack_,
+                   texMgr_,
+                   fontVN_,
+                   lastHint_};
     for (auto &p : panels_)
       if (p->isOpen())
         p->onRender(ctx);
+
+    settingsDialog_.render(ctx);
 
     ImGui::Render();
 
@@ -430,6 +533,9 @@ private:
         dockLayoutBuilt_ = false;
       ImGui::EndMenu();
     }
+
+    if (ImGui::MenuItem("Settings..."))
+      settingsDialog_.open();
 
     const char *turn  = (gameState_.sideToMove() == PieceColor::Red)
                             ? "  Red to move"
@@ -520,8 +626,32 @@ private:
     ImGui::DockBuilderFinish(dockId);
   }
 
+  static constexpr const char *SETTINGS_FILE = "settings.ini";
+
+  void loadSettings() {
+    std::ifstream f(SETTINGS_FILE);
+    if (!f.is_open())
+      return;
+    std::string data((std::istreambuf_iterator<char>(f)),
+                     std::istreambuf_iterator<char>());
+    settings_ = GameSettings::deserialize(data);
+    printf("[App] Settings loaded from %s\n", SETTINGS_FILE);
+  }
+
+  void saveSettings() {
+    std::ofstream f(SETTINGS_FILE);
+    if (!f.is_open()) {
+      fprintf(stderr, "[App] Failed to save settings to %s\n", SETTINGS_FILE);
+      return;
+    }
+    f << settings_.serialize();
+    printf("[App] Settings saved to %s\n", SETTINGS_FILE);
+  }
+
   void shutdown() {
-    engine_.stop();
+    saveSettings();
+    engineRed_.stop();
+    engineBlack_.stop();
     panels_.clear();
 
     ImGui_ImplOpenGL3_Shutdown();

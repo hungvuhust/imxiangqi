@@ -16,8 +16,29 @@ void EngineLogPanel::onRender(AppContext &ctx) {
     return;
   }
 
+  // Chọn engine để xem log
+  if (ImGui::BeginTabBar("##eng-log-tabs")) {
+    struct TabInfo {
+      const char       *label;
+      EngineController *eng;
+    };
+    TabInfo tabs[] = {
+        {  "Red Engine",   &ctx.engineRed},
+        {"Black Engine", &ctx.engineBlack}
+    };
+    for (auto &t : tabs) {
+      if (ImGui::BeginTabItem(t.label)) {
+        activeLog_ = t.eng;
+        ImGui::EndTabItem();
+      }
+    }
+    ImGui::EndTabBar();
+  }
+  if (!activeLog_)
+    activeLog_ = &ctx.engineRed;
+
   if (ImGui::Button("Clear"))
-    ctx.engine.log().clear();
+    activeLog_->log().clear();
   ImGui::SameLine();
   ImGui::Checkbox("Auto-scroll", &autoScroll_);
 
@@ -32,7 +53,7 @@ void EngineLogPanel::onRender(AppContext &ctx) {
 
   ImGui::Separator();
 
-  auto lines = ctx.engine.log().snapshot();
+  auto lines = activeLog_->log().snapshot();
 
   ImGui::BeginChild("##engine-log-scroll",
                     ImVec2(0, 0),
