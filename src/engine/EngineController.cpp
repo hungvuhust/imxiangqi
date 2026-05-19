@@ -1,6 +1,7 @@
 #include "EngineController.hpp"
 
 #include "../core/GameState.hpp"
+#include <algorithm>
 #include <sstream>
 
 namespace XiangQi {
@@ -26,6 +27,9 @@ bool EngineController::start() {
   pendingHint_.reset();
   pendingMoveUcci_.reset();
   lastInfo_.reset();
+  engineOptions_.clear();
+  engineIdName_.clear();
+  analyzeSnapshot_ = AnalyzeSnapshot{};
 
   if (!process_.start(settings_.path)) {
     setError("start failed: " + process_.lastError());
@@ -51,6 +55,7 @@ void EngineController::stop() {
   waitingReady_    = false;
   sentUcci_        = false;
   sentFallbackUci_ = false;
+  ponderMove_.clear();
 }
 
 bool EngineController::restart() {
@@ -82,6 +87,10 @@ void EngineController::update(const GameState & /*game*/) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Basic search
+// ---------------------------------------------------------------------------
+
 bool EngineController::requestMove(const GameState &game) {
   return beginSearch(game, EngineRequestKind::Move);
 }
@@ -94,7 +103,109 @@ void EngineController::cancelThinking() {
   if (state_ != EngineState::Thinking)
     return;
   sendLine("stop");
+  // state stays Thinking until bestmove arrives; that's fine
 }
+
+// ---------------------------------------------------------------------------
+// Analyze mode
+// ---------------------------------------------------------------------------
+
+bool EngineController::startAnalyze(const GameState &game) {
+  if (state_ != EngineState::Ready)
+    return false;
+
+  // Reset snapshot
+  analyzeSnapshot_ = AnalyzeSnapshot{};
+
+  std::string fen = game.toFen();
+  if (!sendLine("position fen " + fen))
+    return false;
+
+  // Send MultiPV setoption before go infinite
+  if (settings_.multiPv > 1)
+    sendLine("setoption name MultiPV value " + std::to_string(settings_.multiPv));
+  else
+    sendLine("setoption name MultiPV value 1");
+
+  if (!sendLine("go infinite"))
+    return false;
+
+  activeRequest_ = EngineRequestKind::Analyze;
+  lastInfo_.reset();
+  state_ = EngineState::Thinking;
+  return true;
+}
+
+void EngineController::stopAnalyze() {
+  if (activeRequest_ != EngineRequestKind::Analyze)
+    return;
+  sendLine("stop");
+  // state_ will move to Ready when bestmove arrives
+}
+
+// ---------------------------------------------------------------------------
+// Ponder
+// ---------------------------------------------------------------------------
+
+bool EngineController::startPonder(const GameState &game,
+                                    const std::string &ponderMoveUcci) {
+  if (state_ != EngineState::Ready || ponderMoveUcci.empty())
+    return false;
+  if (!settings_.ponder)
+    return false;
+
+  ponderMove_ = ponderMoveUcci;
+
+  // Send position + ponder move appended
+  std::string fen = game.toFen();
+  if (!sendLine("position fen " + fen + " moves " + ponderMoveUcci))
+    return false;
+
+  if (!sendLine("go ponder movetime " + std::to_string(settings_.timeMs)))
+    return false;
+
+  activeRequest_ = EngineRequestKind::Ponder;
+  lastInfo_.reset();
+  state_ = EngineState::Thinking;
+  return true;
+}
+
+void EngineController::stopPonder() {
+  if (activeRequest_ != EngineRequestKind::Ponder)
+    return;
+  sendLine("stop");
+}
+
+bool EngineController::sendPonderHit() {
+  if (activeRequest_ != EngineRequestKind::Ponder)
+    return false;
+  // Switch from ponder to real search with ponderhit
+  activeRequest_ = EngineRequestKind::Move;
+  return sendLine("ponderhit");
+}
+
+// ---------------------------------------------------------------------------
+// Engine options
+// ---------------------------------------------------------------------------
+
+void EngineController::flushDirtyOptions() {
+  for (auto &opt : engineOptions_) {
+    if (opt.dirty) {
+      sendOption(opt);
+      opt.dirty = false;
+    }
+  }
+}
+
+void EngineController::sendOption(EngineOption &opt) {
+  std::string cmd = EngineProtocolParser::buildSetOption(opt);
+  sendLine(cmd);
+  opt.dirty = false;
+}
+
+// ---------------------------------------------------------------------------
+// Consume pending outputs
+// ---------------------------------------------------------------------------
 
 bool EngineController::consumePendingMoveUcci(std::string &outMove) {
   if (!pendingMoveUcci_)
@@ -112,6 +223,10 @@ bool EngineController::consumePendingHint(EngineSuggestion &outHint) {
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
 bool EngineController::sendLine(const std::string &line) {
   log_.push(EngineLogDir::In, line);
   if (!process_.writeLine(line)) {
@@ -128,7 +243,8 @@ void EngineController::setError(std::string msg) {
 }
 
 bool EngineController::beginSearch(const GameState  &game,
-                                   EngineRequestKind kind) {
+                                   EngineRequestKind kind,
+                                   const std::string & /*ponderMove*/) {
   if (state_ != EngineState::Ready)
     return false;
 
@@ -151,8 +267,50 @@ bool EngineController::beginSearch(const GameState  &game,
   return true;
 }
 
+void EngineController::updateAnalyzeSnapshot(const EngineInfo &info) {
+  int idx = info.multipv - 1;
+  if (idx < 0) idx = 0;
+
+  // Grow vector if needed
+  if (idx >= static_cast<int>(analyzeSnapshot_.pvLines.size()))
+    analyzeSnapshot_.pvLines.resize(idx + 1);
+
+  PvLine &pv     = analyzeSnapshot_.pvLines[idx];
+  pv.multipv     = info.multipv;
+  pv.depth       = info.depth;
+  pv.hasScoreCp  = info.hasScoreCp;
+  pv.scoreCp     = info.scoreCp;
+  pv.hasMate     = info.hasMate;
+  pv.mate        = info.mate;
+  pv.pv          = info.pv;
+
+  if (info.depth > analyzeSnapshot_.depth)
+    analyzeSnapshot_.depth = info.depth;
+}
+
 void EngineController::handleEngineLine(const std::string &line) {
+  // --- Handshaking ---
   if (state_ == EngineState::Handshaking) {
+    // Collect id name
+    std::string name = EngineProtocolParser::parseIdName(line);
+    if (!name.empty()) {
+      engineIdName_ = name;
+      return;
+    }
+
+    // Collect options advertised during handshake
+    if (auto opt = EngineProtocolParser::parseOption(line)) {
+      // Skip internal-only options we manage ourselves
+      if (opt->name != "UCI_Chess960" && opt->name != "UCI_Variant") {
+        // Check if already exists (re-handshake scenario)
+        auto it = std::find_if(engineOptions_.begin(), engineOptions_.end(),
+                               [&](const EngineOption &o) { return o.name == opt->name; });
+        if (it == engineOptions_.end())
+          engineOptions_.push_back(*opt);
+      }
+      return;
+    }
+
     if (EngineProtocolParser::isUcciOk(line)) {
       detectedProtocol_ = EngineProtocol::UCCI;
       applyConfiguredOptions();
@@ -177,6 +335,7 @@ void EngineController::handleEngineLine(const std::string &line) {
     }
   }
 
+  // --- Waiting for readyok ---
   if (waitingReady_ && EngineProtocolParser::isReadyOk(line)) {
     waitingReady_ = false;
     state_        = EngineState::Ready;
@@ -184,17 +343,21 @@ void EngineController::handleEngineLine(const std::string &line) {
     return;
   }
 
+  // --- info lines (during Thinking) ---
   EngineInfo info;
   if (lastInfo_)
     info = *lastInfo_;
   if (EngineProtocolParser::parseInfo(line, info)) {
     lastInfo_ = info;
+    // Live update analyze snapshot when in analyze mode
+    if (activeRequest_ == EngineRequestKind::Analyze)
+      updateAnalyzeSnapshot(info);
     return;
   }
 
+  // --- bestmove ---
   auto best =
-      EngineProtocolParser::parseBestMove(line,
-                                          lastInfo_.value_or(EngineInfo{}));
+      EngineProtocolParser::parseBestMove(line, lastInfo_.value_or(EngineInfo{}));
   if (!best)
     return;
 
@@ -202,6 +365,11 @@ void EngineController::handleEngineLine(const std::string &line) {
     pendingMoveUcci_ = best->moveUcci;
   } else if (activeRequest_ == EngineRequestKind::Hint) {
     pendingHint_ = *best;
+  } else if (activeRequest_ == EngineRequestKind::Analyze) {
+    // Analyze mode received bestmove (after stop); just go back to Ready
+    // analyzeSnapshot_ already has the last info
+  } else if (activeRequest_ == EngineRequestKind::Ponder) {
+    // Ponder was stopped without ponderhit — discard
   }
 
   activeRequest_ = EngineRequestKind::None;
@@ -210,14 +378,9 @@ void EngineController::handleEngineLine(const std::string &line) {
 }
 
 void EngineController::applyConfiguredOptions() {
-  if (settings_.ponder)
-    sendLine("setoption name Ponder value true");
-  else
-    sendLine("setoption name Ponder value false");
-
-  if (settings_.depth > 0) {
-    sendLine("setoption name MultiPV value 1");
-  }
+  sendLine("setoption name Ponder value " +
+           std::string(settings_.ponder ? "true" : "false"));
+  sendLine("setoption name MultiPV value " + std::to_string(settings_.multiPv));
 }
 
 } // namespace XiangQi

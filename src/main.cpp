@@ -214,7 +214,34 @@ private:
                            "failed to apply bestmove: " + moveUcci);
       } else {
         lastHint_.reset();
+        // After engine plays, try to start pondering on opponent's turn
+        maybeStartPonder(moveUcci);
       }
+    }
+  }
+
+  // Start pondering: engine already played moveUcci, we guess the opponent's
+  // next move by asking for a hint-like search, then pass the ponder move.
+  // Simplified: we re-use the last bestmove's ponder move if available.
+  void maybeStartPonder(const std::string & /*engineMoveUcci*/) {
+    if (!settings_.engine.ponder)
+      return;
+    if (!settings_.hasEngine())
+      return;
+    if (!gameState_.isPlaying())
+      return;
+    if (isEngineTurn()) // still engine's turn after applying move? shouldn't happen
+      return;
+    if (!engine_.isReady())
+      return;
+
+    // Extract ponder move from last info's PV (first token after engine move)
+    if (engine_.lastInfo() && !engine_.lastInfo()->pv.empty()) {
+      const std::string &pv = engine_.lastInfo()->pv;
+      // PV starts with the ponder move (opponent's expected reply)
+      std::string ponderMove = pv.substr(0, pv.find(' '));
+      if (!ponderMove.empty())
+        engine_.startPonder(gameState_, ponderMove);
     }
   }
 
@@ -229,6 +256,13 @@ private:
     // Wait if we just did an undo
     if (std::chrono::steady_clock::now() < undoDelayUntil_)
       return;
+
+    // If we are pondering and the opponent just played, check ponderhit
+    if (engine_.isPondering()) {
+      // Opponent has moved — send ponderhit to convert ponder into real search
+      engine_.sendPonderHit();
+      return;
+    }
 
     if (!engine_.isReady())
       return;
@@ -253,11 +287,15 @@ private:
         switch (e.key.keysym.sym) {
         case SDLK_n:
           gameState_.newGame();
+          engine_.stopAnalyze();
+          engine_.stopPonder();
           engine_.cancelThinking();
           break;
         case SDLK_z:
           if (gameState_.canUndo()) {
             gameState_.undoMove();
+            engine_.stopAnalyze();
+            engine_.stopPonder();
             engine_.cancelThinking();
             undoDelayUntil_ =
                 std::chrono::steady_clock::now() + UNDO_RESTART_DELAY;
@@ -311,10 +349,14 @@ private:
     if (ImGui::BeginMenu("Game")) {
       if (ImGui::MenuItem("New Game", "N")) {
         gameState_.newGame();
+        engine_.stopAnalyze();
+        engine_.stopPonder();
         engine_.cancelThinking();
       }
       if (ImGui::MenuItem("Undo Move", "Z") && gameState_.canUndo()) {
         gameState_.undoMove();
+        engine_.stopAnalyze();
+        engine_.stopPonder();
         engine_.cancelThinking();
       }
       ImGui::Separator();
