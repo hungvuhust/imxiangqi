@@ -215,7 +215,8 @@ void SettingsDialog::tabEngine(AppContext &ctx) {
   // New Engine button
   if (ImGui::Button("+ New Engine", {-1, 0})) {
     pool.addEngine();
-    bufsInit_ = false; // force re-sync
+    bufsInit_ = false; // mark dirty so syncBuffers will re-init all slots
+    syncBuffers(pool); // re-sync immediately so bufs_ matches pool this frame
   }
 
   ImGui::Spacing();
@@ -230,15 +231,17 @@ void SettingsDialog::tabEngine(AppContext &ctx) {
   ImGui::BeginChild("##engine-list", {0, 0}, false);
   for (int i = 0; i < (int)pool.entries.size(); ++i) {
     ImGui::PushID(i);
-    renderOneEngine(i, ctx);
+    bool removed = renderOneEngine(i, ctx);
     ImGui::PopID();
+    if (removed) break; // bufs_ was invalidated; skip remaining this frame
     ImGui::Spacing();
   }
   ImGui::EndChild();
 }
 
 // -----------------------------------------------------------------------
-void SettingsDialog::renderOneEngine(int idx, AppContext &ctx) {
+// Returns true if the engine was removed (caller must break render loop).
+bool SettingsDialog::renderOneEngine(int idx, AppContext &ctx) {
   EnginePool        &pool = ctx.settings.pool;
   EnginePool::Entry &e    = pool.entries[idx];
   EngineController  &eng  = *e.ctrl;
@@ -263,8 +266,9 @@ void SettingsDialog::renderOneEngine(int idx, AppContext &ctx) {
     if (ImGui::SmallButton("Yes##delyes")) {
       pool.removeEngine(idx);
       bufsInit_      = false;
+      syncBuffers(pool); // resize bufs_ immediately so it stays valid
       deleteConfirm_ = -1;
-      return; // idx is now invalid
+      return true; // idx is now invalid; caller must break loop
     }
     ImGui::SameLine();
     if (ImGui::SmallButton("No##delno"))
@@ -272,7 +276,7 @@ void SettingsDialog::renderOneEngine(int idx, AppContext &ctx) {
   }
 
   if (!open)
-    return;
+    return false;
 
   // Display name
   if (ImGui::InputText("Display name",
@@ -341,6 +345,7 @@ void SettingsDialog::renderOneEngine(int idx, AppContext &ctx) {
     eng.restart();
 
   renderEngineOptions(eng);
+  return false;
 }
 
 // -----------------------------------------------------------------------

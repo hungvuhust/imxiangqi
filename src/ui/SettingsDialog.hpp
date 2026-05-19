@@ -34,7 +34,8 @@ private:
   void tabBoard(AppContext &ctx);
   void tabColors(AppContext &ctx);
 
-  void renderOneEngine(int idx, AppContext &ctx);
+  // Returns true if the engine at idx was removed (caller must break loop).
+  bool renderOneEngine(int idx, AppContext &ctx);
 };
 
 } // namespace XiangQi
