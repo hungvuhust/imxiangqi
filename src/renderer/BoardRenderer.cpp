@@ -393,27 +393,25 @@ void BoardRenderer::drawPvArrows(ImDrawList            *dl,
     return;
 
   // ------------------------------------------------------------------
-  // Base colour by side-to-move  (pastel)
-  // Red side  → pastel red  R:255 G:140 B:140
-  // Black side → pastel blue R:110 G:170 B:255
+  // Colours
+  //   Red  side: vivid red   (220,60,60)  — saturated, not pastel
+  //   Black side: vivid blue (60,130,230)
+  //   Both use 50% alpha so pieces underneath are still readable.
   // ------------------------------------------------------------------
-  const ImVec4 baseF = snap.redToMove ? ImVec4(1.0f, 0.55f, 0.55f, 1.0f)
-                                      : ImVec4(0.43f, 0.67f, 1.0f, 1.0f);
+  const int R = snap.redToMove ? 220 : 60;
+  const int G = snap.redToMove ? 60 : 130;
+  const int B = snap.redToMove ? 60 : 230;
 
-  // Non-best arrows use the same hue but more transparent
-  auto makeCol = [&](float alpha) -> ImU32 {
-    return IM_COL32(static_cast<int>(baseF.x * 255),
-                    static_cast<int>(baseF.y * 255),
-                    static_cast<int>(baseF.z * 255),
-                    static_cast<int>(alpha * 255));
-  };
+  auto mkCol = [&](int a) -> ImU32 { return IM_COL32(R, G, B, a); };
 
   // ------------------------------------------------------------------
-  // Find best PV index (highest score from engine's POV)
+  // Find best PV (highest engine score)
   // ------------------------------------------------------------------
   auto scoreOf = [](const PvLine &pv) -> int {
-    if (pv.hasMate)   return 100000 - std::abs(pv.mate) * 10;
-    if (pv.hasScoreCp) return pv.scoreCp;
+    if (pv.hasMate)
+      return 100000 - std::abs(pv.mate) * 10;
+    if (pv.hasScoreCp)
+      return pv.scoreCp;
     return -999999;
   };
   int bestIdx = 0;
@@ -422,93 +420,89 @@ void BoardRenderer::drawPvArrows(ImDrawList            *dl,
       bestIdx = i;
 
   // ------------------------------------------------------------------
-  // Sizing
+  // Sizing constants
   // ------------------------------------------------------------------
-  float minCell = std::min(cellW(), cellH());
-  float thick   = std::max(6.0f, minCell * 0.13f);  // thicker shaft
-  float headLen = std::max(18.0f, minCell * 0.38f);
-  float headW   = headLen * 0.70f;
-  float fontSize = std::max(11.0f, minCell * 0.20f);
+  const float minCell  = std::min(cellW(), cellH());
+  const float thick    = std::max(7.0f, minCell * 0.11f);
+  const float headLen  = std::max(16.0f, minCell * 0.30f);
+  const float headW    = headLen * 0.72f;
+  // Piece radius ≈ minCell*0.44 → shrink shaft ends so arrow doesn't start
+  // inside the piece circle
+  const float pieceR   = minCell * 0.44f;
+  const float fontSize = std::max(10.0f, minCell * 0.17f); // slightly smaller
 
   // ------------------------------------------------------------------
-  // Draw each PV line
+  // Per-PV drawing
   // ------------------------------------------------------------------
   for (int idx = 0; idx < static_cast<int>(snap.pvLines.size()); ++idx) {
-    const PvLine &pv      = snap.pvLines[idx];
-    const bool    isBest  = (idx == bestIdx);
+    const PvLine &pv     = snap.pvLines[idx];
+    const bool    isBest = (idx == bestIdx);
 
-    if (pv.pv.empty()) continue;
+    if (pv.pv.empty())
+      continue;
 
-    // First move token, e.g. "h9g7"
     std::string firstMove = pv.pv.substr(0, pv.pv.find(' '));
-    if (firstMove.size() < 4) continue;
+    if (firstMove.size() < 4)
+      continue;
 
     Square from = Square::fromString(firstMove.substr(0, 2));
     Square to   = Square::fromString(firstMove.substr(2, 2));
-    if (!from.valid() || !to.valid()) continue;
+    if (!from.valid() || !to.valid())
+      continue;
 
-    // Exact grid-intersection centres (no extra offset)
+    // Exact intersection centres
     ImVec2 p0 = squareCenter(from, boardOrigin);
-    ImVec2 p1 = squareCenter(to,   boardOrigin);
+    ImVec2 p1 = squareCenter(to, boardOrigin);
 
     ImVec2 d   = {p1.x - p0.x, p1.y - p0.y};
     float  len = std::sqrt(d.x * d.x + d.y * d.y);
-    if (len < 1.0f) continue;
+    if (len < 1.0f)
+      continue;
 
-    ImVec2 n    = {d.x / len, d.y / len};      // unit direction
-    ImVec2 perp = {-n.y, n.x};                 // perpendicular
+    ImVec2 n    = {d.x / len, d.y / len};
+    ImVec2 perp = {-n.y, n.x};
 
-    // Slight lateral offset so multiple arrows don't perfectly stack
-    float  laneOffset =
+    // Lateral lane so parallel arrows don't overlap
+    float laneOff =
         (snap.pvLines.size() > 1)
-            ? (idx - static_cast<float>(snap.pvLines.size() - 1) * 0.5f) *
-                  (thick * 1.6f)
+            ? (idx - (snap.pvLines.size() - 1) * 0.5f) * thick * 1.5f
             : 0.0f;
-    ImVec2 shift = {perp.x * laneOffset, perp.y * laneOffset};
+    ImVec2 sh = {perp.x * laneOff, perp.y * laneOff};
 
-    // Shaft: starts exactly at intersection p0, ends at arrowhead base
-    ImVec2 A        = {p0.x + shift.x, p0.y + shift.y};
-    ImVec2 B        = {p1.x + shift.x, p1.y + shift.y};
-    ImVec2 tip      = B;
-    ImVec2 baseHead = {tip.x - n.x * headLen, tip.y - n.y * headLen};
-    ImVec2 shaftEnd = {baseHead.x - n.x * 1.5f, baseHead.y - n.y * 1.5f};
+    // Shaft: push start/end inward by pieceR so it touches the rim of
+    // the piece circle rather than burrowing through the centre
+    ImVec2 A   = {p0.x + sh.x + n.x * pieceR, p0.y + sh.y + n.y * pieceR};
+    ImVec2 tip = {p1.x + sh.x, p1.y + sh.y};
 
-    // Arrowhead wing points
-    ImVec2 lwing = {baseHead.x + perp.x * headW * 0.5f,
-                    baseHead.y + perp.y * headW * 0.5f};
-    ImVec2 rwing = {baseHead.x - perp.x * headW * 0.5f,
-                    baseHead.y - perp.y * headW * 0.5f};
+    ImVec2 headBase = {tip.x - n.x * headLen, tip.y - n.y * headLen};
+    ImVec2 shaftEnd = {headBase.x - n.x * 1.0f, headBase.y - n.y * 1.0f};
 
-    // Alpha: best PV full opacity, others semi-transparent
-    float  alpha    = isBest ? 0.90f : 0.55f;
-    ImU32  col      = makeCol(alpha);
-    ImU32  colDim   = makeCol(alpha * 0.35f); // dark outline tint
+    ImVec2 lwing = {headBase.x + perp.x * headW * 0.5f,
+                    headBase.y + perp.y * headW * 0.5f};
+    ImVec2 rwing = {headBase.x - perp.x * headW * 0.5f,
+                    headBase.y - perp.y * headW * 0.5f};
 
-    // ---- Shaft outline (dark halo) ----
-    dl->AddLine(A, shaftEnd, IM_COL32(0, 0, 0, static_cast<int>(alpha * 110)),
-                thick + 3.0f);
-    // ---- Shaft fill ----
-    dl->AddLine(A, shaftEnd, col, thick);
+    // Best = 50% alpha, non-best = 30% alpha (still vivid, not pastel)
+    int alphaShaft = isBest ? 178 : 110;
+    int alphaHead  = isBest ? 210 : 130;
+    int shadowA    = isBest ? 100 : 60;
 
-    // ---- Arrowhead outline ----
-    dl->AddTriangleFilled(tip, lwing, rwing,
-                          IM_COL32(0, 0, 0, static_cast<int>(alpha * 110)));
-    // ---- Arrowhead fill ----
-    ImVec2 tipIn  = {tip.x  + n.x * 1.5f, tip.y  + n.y * 1.5f};
-    ImVec2 lwingIn = {lwing.x - n.x * 0.8f, lwing.y - n.y * 0.8f};
-    ImVec2 rwingIn = {rwing.x - n.x * 0.8f, rwing.y - n.y * 0.8f};
-    dl->AddTriangleFilled(tipIn, lwingIn, rwingIn, col);
+    // ---- shadow halo ----
+    dl->AddLine(A, shaftEnd, IM_COL32(0, 0, 0, shadowA), thick + 3.0f);
+    // ---- shaft ----
+    dl->AddLine(A, shaftEnd, mkCol(alphaShaft), thick);
 
-    // ---- Origin dot at start intersection ----
-    float dotR = thick * 0.65f;
-    dl->AddCircleFilled(A, dotR + 1.5f,
-                        IM_COL32(0, 0, 0, static_cast<int>(alpha * 110)));
-    dl->AddCircleFilled(A, dotR, col);
+    // ---- arrowhead shadow ----
+    dl->AddTriangleFilled(tip, lwing, rwing, IM_COL32(0, 0, 0, shadowA));
+    // ---- arrowhead fill ----
+    ImVec2 tipIn = {tip.x + n.x * 1.2f, tip.y + n.y * 1.2f};
+    ImVec2 lwIn  = {lwing.x - n.x * 0.6f, lwing.y - n.y * 0.6f};
+    ImVec2 rwIn  = {rwing.x - n.x * 0.6f, rwing.y - n.y * 0.6f};
+    dl->AddTriangleFilled(tipIn, lwIn, rwIn, mkCol(alphaHead));
 
     // ------------------------------------------------------------------
-    // Score badge — star-shaped background
+    // Score badge  (midpoint of shaft)
     // ------------------------------------------------------------------
-    // Build label: float with 2 decimals, e.g. "+1.50"
     char label[32];
     if (pv.hasMate)
       snprintf(label, sizeof(label), "M%d", pv.mate);
@@ -517,37 +511,30 @@ void BoardRenderer::drawPvArrows(ImDrawList            *dl,
     else
       snprintf(label, sizeof(label), "?");
 
-    // Badge sits at shaft midpoint
-    ImVec2 mid = {(A.x + shaftEnd.x) * 0.5f, (A.y + shaftEnd.y) * 0.5f};
+    ImVec2 mid   = {(A.x + shaftEnd.x) * 0.5f, (A.y + shaftEnd.y) * 0.5f};
+    float  scale = fontSize / ImGui::GetFontSize();
+    ImVec2 ts    = ImGui::CalcTextSize(label);
+    float  tW    = ts.x * scale;
+    float  tH    = ts.y * scale;
+    float  bR    = std::max(tW, tH) * 0.58f + 5.0f; // badge radius
 
-    // Measure text at target font size
-    float  scale     = fontSize / ImGui::GetFontSize();
-    ImVec2 rawSize   = ImGui::CalcTextSize(label);
-    float  textW     = rawSize.x * scale;
-    float  textH     = rawSize.y * scale;
-
-    // Star outer radius sized to contain the text comfortably
-    float  starR     = std::max(textW, textH) * 0.62f + 6.0f;
-
-    ImU32  bgDark    = IM_COL32(15, 15, 15, static_cast<int>(alpha * 210));
-    ImU32  colBright = makeCol(std::min(1.0f, alpha + 0.1f));
+    ImU32 bgCol   = IM_COL32(20, 20, 20, isBest ? 210 : 170);
+    ImU32 rimCol  = mkCol(isBest ? 230 : 160);
+    ImU32 textCol = IM_COL32(255, 255, 255, isBest ? 255 : 200); // white bold
 
     if (isBest) {
-      // Best PV: filled star badge
-      drawStar(dl, mid.x, mid.y, starR, bgDark);       // dark fill
-      drawStar(dl, mid.x, mid.y, starR, colDim);        // tinted fill overlay
-      drawStarOutline(dl, mid.x, mid.y, starR,
-                      colBright, 2.0f);                 // bright border
+      // Best PV → star-shaped badge
+      drawStar(dl, mid.x, mid.y, bR, bgCol);
+      drawStarOutline(dl, mid.x, mid.y, bR, rimCol, 2.0f);
     } else {
-      // Non-best: star outline only
-      drawStar(dl, mid.x, mid.y, starR, bgDark);        // dark fill
-      drawStarOutline(dl, mid.x, mid.y, starR,
-                      col, 1.5f);                        // outline
+      // Non-best → circle badge
+      dl->AddCircleFilled(mid, bR, bgCol);
+      dl->AddCircle(mid, bR, rimCol, 32, 1.5f);
     }
 
-    // Score text centred inside star
-    ImVec2 textPos = {mid.x - textW * 0.5f, mid.y - textH * 0.5f};
-    dl->AddText(nullptr, fontSize, textPos, colBright, label);
+    // White text (looks "bold" against the dark badge)
+    ImVec2 tp = {mid.x - tW * 0.5f, mid.y - tH * 0.5f};
+    dl->AddText(nullptr, fontSize, tp, textCol, label);
   }
 }
 
@@ -575,14 +562,14 @@ void BoardRenderer::render(GameState                        &gameState,
   // 3. Coordinates
   drawCoordinates(dl, boardOrigin);
 
-  // 4. PV arrows from analyze mode (drawn before hint, under pieces)
-  drawPvArrows(dl, boardOrigin, analyzeSnapshot);
-
-  // 5. Hint arrow
+  // 4. Hint arrow (under pieces)
   drawHintArrow(dl, boardOrigin, hintMoveUcci);
 
-  // 6. Pieces (on top of arrows)
+  // 5. Pieces
   drawPieces(dl, boardOrigin, gameState.board());
+
+  // 6. PV arrows on top of pieces so they are always visible
+  drawPvArrows(dl, boardOrigin, analyzeSnapshot);
 
   // 7. Mouse click → GameState
   if (boardHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {

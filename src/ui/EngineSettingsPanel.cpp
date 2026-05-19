@@ -37,10 +37,7 @@ void EngineSettingsPanel::syncBuffers(const EngineSettings &s) {
 bool EngineSettingsPanel::browseEnginePath(EngineSettings &s) {
   pfd::open_file picker("Select engine binary",
                         defaultPickerPath(s.path),
-                        {"Executable files",
-                         "*.exe *.bin *.out *.xq *.uci *.ucci",
-                         "All Files",
-                         "*"},
+                        {"All Files", "*"},
                         pfd::opt::none);
 
   auto files = picker.result();
