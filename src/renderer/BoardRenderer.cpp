@@ -459,16 +459,9 @@ void BoardRenderer::drawPvArrows(ImDrawList            *dl,
     ImVec2 n    = {d.x / len, d.y / len};
     ImVec2 perp = {-n.y, n.x};
 
-    // Lateral lane so parallel arrows don't overlap
-    float laneOff =
-        (snap.pvLines.size() > 1)
-            ? (idx - (snap.pvLines.size() - 1) * 0.5f) * thick * 1.5f
-            : 0.0f;
-    ImVec2 sh = {perp.x * laneOff, perp.y * laneOff};
-
-    // Arrow from exact centre to exact centre; arrowhead covers the tip
-    ImVec2 A   = {p0.x + sh.x, p0.y + sh.y};
-    ImVec2 tip = {p1.x + sh.x, p1.y + sh.y};
+    // Straight centre-to-centre, no lateral shift
+    ImVec2 A   = p0;
+    ImVec2 tip = p1;
 
     ImVec2 headBase = {tip.x - n.x * headLen, tip.y - n.y * headLen};
     ImVec2 shaftEnd = {headBase.x - n.x * 1.0f, headBase.y - n.y * 1.0f};
