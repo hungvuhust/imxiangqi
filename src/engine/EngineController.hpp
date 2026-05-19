@@ -33,25 +33,31 @@ public:
   // --- Analyze mode ---
   bool startAnalyze(const GameState &game);
   void stopAnalyze();
-  bool isAnalyzing() const { return activeRequest_ == EngineRequestKind::Analyze; }
+  bool isAnalyzing() const {
+    return activeRequest_ == EngineRequestKind::Analyze;
+  }
   const AnalyzeSnapshot &analyzeSnapshot() const { return analyzeSnapshot_; }
 
   // --- Ponder ---
   bool startPonder(const GameState &game, const std::string &ponderMoveUcci);
   void stopPonder(); // sends "stop"; caller must call ponderhit or just discard
-  bool isPondering() const { return activeRequest_ == EngineRequestKind::Ponder; }
+  bool isPondering() const {
+    return activeRequest_ == EngineRequestKind::Ponder;
+  }
   // Call when opponent played the expected ponder move
   bool sendPonderHit();
 
   // --- Engine options ---
-  const std::vector<EngineOption> &engineOptions() const { return engineOptions_; }
-  std::vector<EngineOption>       &engineOptions()       { return engineOptions_; }
+  const std::vector<EngineOption> &engineOptions() const {
+    return engineOptions_;
+  }
+  std::vector<EngineOption> &engineOptions() { return engineOptions_; }
   // Send all dirty options to engine; clears dirty flags
-  void flushDirtyOptions();
+  void                       flushDirtyOptions();
   // Send a specific option immediately
-  void sendOption(EngineOption &opt);
+  void                       sendOption(EngineOption &opt);
   // Detected engine name (from "id name")
-  const std::string &engineIdName() const { return engineIdName_; }
+  const std::string         &engineIdName() const { return engineIdName_; }
 
   // --- Consume outputs ---
   bool consumePendingMoveUcci(std::string &outMove);
@@ -59,22 +65,23 @@ public:
 
   // --- State queries ---
   bool isRunning() const { return process_.isRunning(); }
-  bool isReady()   const { return state_ == EngineState::Ready; }
+  bool isReady() const { return state_ == EngineState::Ready; }
   bool isThinking() const { return state_ == EngineState::Thinking; }
 
-  EngineState    state()    const { return state_; }
+  EngineState    state() const { return state_; }
   EngineProtocol protocol() const { return detectedProtocol_; }
 
   const std::string               &lastError() const { return lastError_; }
-  const std::optional<EngineInfo> &lastInfo()  const { return lastInfo_; }
+  const std::optional<EngineInfo> &lastInfo() const { return lastInfo_; }
 
-  EngineLog       &log()       { return log_; }
+  EngineLog       &log() { return log_; }
   const EngineLog &log() const { return log_; }
 
 private:
   bool sendLine(const std::string &line);
   void setError(std::string msg);
-  bool beginSearch(const GameState &game, EngineRequestKind kind,
+  bool beginSearch(const GameState   &game,
+                   EngineRequestKind  kind,
                    const std::string &ponderMove = {});
 
   void handleEngineLine(const std::string &line);

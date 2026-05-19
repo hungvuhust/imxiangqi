@@ -1,5 +1,6 @@
 #include "BoardRenderer.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <imgui.h>
@@ -336,11 +337,176 @@ void BoardRenderer::drawHintArrow(
 }
 
 // =======================================================================
+//  PV arrows  (Analyze mode MultiPV visualisation)
+// =======================================================================
+
+// Colour palette for up to 5 PV lines. Index 0 = best line.
+static constexpr ImU32 kPvPalette[5] = {
+    IM_COL32(255, 210, 40, 230),  // PV1 – gold   (best)
+    IM_COL32(80, 200, 255, 200),  // PV2 – sky blue
+    IM_COL32(120, 230, 120, 200), // PV3 – green
+    IM_COL32(230, 130, 255, 190), // PV4 – violet
+    IM_COL32(255, 140, 60, 190),  // PV5 – orange
+};
+
+// Draw a filled 5-pointed star centred at (cx,cy) with outer radius r.
+static void drawStar(ImDrawList *dl, float cx, float cy, float r, ImU32 col) {
+  static constexpr int   N     = 5;
+  static constexpr float INNER = 0.42f; // inner/outer ratio
+  ImVec2                 pts[10];
+  for (int i = 0; i < N; ++i) {
+    float aouter = -static_cast<float>(M_PI) / 2.0f +
+                   i * 2.0f * static_cast<float>(M_PI) / N;
+    float ainner   = aouter + static_cast<float>(M_PI) / N;
+    pts[2 * i]     = {cx + r * std::cos(aouter), cy + r * std::sin(aouter)};
+    pts[2 * i + 1] = {cx + r * INNER * std::cos(ainner),
+                      cy + r * INNER * std::sin(ainner)};
+  }
+  dl->AddConvexPolyFilled(pts, 10, col);
+}
+
+void BoardRenderer::drawPvArrows(ImDrawList            *dl,
+                                 ImVec2                 boardOrigin,
+                                 const AnalyzeSnapshot &snap) const {
+  if (snap.pvLines.empty())
+    return;
+
+  // Find the best score (highest scoreCp, or smallest mate distance).
+  // We compare by a unified "centipawn-equivalent" value.
+  auto scoreOf = [](const PvLine &pv) -> int {
+    if (pv.hasMate)
+      return 100000 - std::abs(pv.mate) * 10; // closer mate = better
+    if (pv.hasScoreCp)
+      return pv.scoreCp;
+    return -999999;
+  };
+
+  int bestIdx = 0;
+  for (int i = 1; i < static_cast<int>(snap.pvLines.size()); ++i)
+    if (scoreOf(snap.pvLines[i]) > scoreOf(snap.pvLines[bestIdx]))
+      bestIdx = i;
+
+  float minCell = std::min(cellW(), cellH());
+  float thick   = std::max(3.0f, minCell * 0.07f);
+  float headLen = std::max(14.0f, minCell * 0.32f);
+  float headW   = headLen * 0.62f;
+
+  for (int idx = 0; idx < static_cast<int>(snap.pvLines.size()); ++idx) {
+    const PvLine &pv = snap.pvLines[idx];
+
+    // Need at least one move in PV
+    if (pv.pv.empty())
+      continue;
+
+    // Extract first move token from PV string (e.g. "h9g7 ...")
+    std::string firstMove = pv.pv.substr(0, pv.pv.find(' '));
+    if (firstMove.size() < 4)
+      continue;
+
+    Square from = Square::fromString(firstMove.substr(0, 2));
+    Square to   = Square::fromString(firstMove.substr(2, 2));
+    if (!from.valid() || !to.valid())
+      continue;
+
+    ImVec2 p0  = squareCenter(from, boardOrigin);
+    ImVec2 p1  = squareCenter(to, boardOrigin);
+    ImVec2 d   = {p1.x - p0.x, p1.y - p0.y};
+    float  len = std::sqrt(d.x * d.x + d.y * d.y);
+    if (len < 1.0f)
+      continue;
+
+    ImVec2 n    = {d.x / len, d.y / len};
+    ImVec2 perp = {-n.y, n.x};
+
+    // Slightly offset parallel arrows so they don't overlap
+    float offset =
+        (snap.pvLines.size() > 1)
+            ? (idx - static_cast<float>(snap.pvLines.size() - 1) * 0.5f) *
+                  thick * 1.8f
+            : 0.0f;
+    ImVec2 shift = {perp.x * offset, perp.y * offset};
+
+    ImVec2 A = {p0.x + shift.x, p0.y + shift.y};
+    ImVec2 B = {p1.x + shift.x, p1.y + shift.y};
+
+    // Arrowhead geometry
+    ImVec2 tip      = B;
+    ImVec2 base     = {tip.x - n.x * headLen, tip.y - n.y * headLen};
+    ImVec2 lw       = {base.x + perp.x * headW * 0.5f,
+                       base.y + perp.y * headW * 0.5f};
+    ImVec2 rw       = {base.x - perp.x * headW * 0.5f,
+                       base.y - perp.y * headW * 0.5f};
+    // Shaft ends just before the arrowhead base
+    ImVec2 shaftEnd = {base.x - n.x * 2.0f, base.y - n.y * 2.0f};
+
+    ImU32 col     = kPvPalette[idx % 5];
+    ImU32 colDark = IM_COL32(0, 0, 0, 120); // thin dark outline for legibility
+
+    // --- Shaft ---
+    dl->AddLine(A, shaftEnd, colDark, thick + 2.5f);
+    dl->AddLine(A, shaftEnd, col, thick);
+
+    // --- Arrowhead ---
+    dl->AddTriangleFilled(tip, lw, rw, colDark); // shadow
+    ImVec2 tipS = {tip.x + n.x * 1.5f, tip.y + n.y * 1.5f};
+    ImVec2 lwS  = {lw.x - n.x * 1.0f, lw.y - n.y * 1.0f};
+    ImVec2 rwS  = {rw.x - n.x * 1.0f, rw.y - n.y * 1.0f};
+    dl->AddTriangleFilled(tipS, lwS, rwS, col);
+
+    // --- Origin dot ---
+    float dotR = std::max(3.0f, thick * 0.9f);
+    dl->AddCircleFilled(A, dotR + 1.5f, colDark);
+    dl->AddCircleFilled(A, dotR, col);
+
+    // --- Score badge  ----(-20)---->
+    // Position: midpoint of the shaft
+    ImVec2 mid = {(A.x + shaftEnd.x) * 0.5f, (A.y + shaftEnd.y) * 0.5f};
+
+    // Build label string
+    char label[32];
+    if (pv.hasMate)
+      snprintf(label, sizeof(label), "M%d", pv.mate);
+    else if (pv.hasScoreCp)
+      snprintf(label, sizeof(label), "%+.0f", pv.scoreCp / 100.0f);
+    else
+      snprintf(label, sizeof(label), "?");
+
+    float  fontSize  = std::max(10.0f, minCell * 0.22f);
+    ImVec2 labelSize = ImGui::CalcTextSize(label);
+    // Scale text size estimate (CalcTextSize uses default font size)
+    float  scale     = fontSize / ImGui::GetFontSize();
+    float  lw2       = labelSize.x * scale;
+    float  lh2       = labelSize.y * scale;
+
+    bool  isBest = (idx == bestIdx);
+    float badgeR = std::max(lw2, lh2) * 0.62f + 4.0f;
+
+    // Circle background
+    ImU32 bgCol = IM_COL32(20, 20, 20, 210);
+    dl->AddCircleFilled(mid, badgeR, bgCol);
+    dl->AddCircle(mid, badgeR, col, 32, 2.0f);
+
+    // Score text centered in circle
+    ImVec2 textPos = {mid.x - lw2 * 0.5f, mid.y - lh2 * 0.5f};
+    dl->AddText(nullptr, fontSize, textPos, col, label);
+
+    // Star for best PV  (small, just above the circle)
+    if (isBest) {
+      float starR  = badgeR * 0.38f;
+      float starCx = mid.x + badgeR + starR + 2.0f;
+      float starCy = mid.y;
+      drawStar(dl, starCx, starCy, starR, IM_COL32(255, 230, 50, 255));
+    }
+  }
+}
+
+// =======================================================================
 //  Main render entry point
 //  Called by BoardPanel::onRender() – no side-panel logic here.
 // =======================================================================
 void BoardRenderer::render(GameState                        &gameState,
-                           const std::optional<std::string> &hintMoveUcci) {
+                           const std::optional<std::string> &hintMoveUcci,
+                           const AnalyzeSnapshot            &analyzeSnapshot) {
   ImVec2 boardOrigin = ImGui::GetCursorScreenPos();
 
   // Invisible button covers the entire board PNG area for mouse capture
@@ -358,13 +524,16 @@ void BoardRenderer::render(GameState                        &gameState,
   // 3. Coordinates
   drawCoordinates(dl, boardOrigin);
 
-  // 4. Hint arrow
+  // 4. PV arrows from analyze mode (drawn before hint, under pieces)
+  drawPvArrows(dl, boardOrigin, analyzeSnapshot);
+
+  // 5. Hint arrow
   drawHintArrow(dl, boardOrigin, hintMoveUcci);
 
-  // 5. Pieces
+  // 6. Pieces (on top of arrows)
   drawPieces(dl, boardOrigin, gameState.board());
 
-  // 6. Mouse click → GameState
+  // 7. Mouse click → GameState
   if (boardHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
     Square sq = pixelToSquare(ImGui::GetMousePos(), boardOrigin);
     if (sq.valid())

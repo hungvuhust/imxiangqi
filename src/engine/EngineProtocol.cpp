@@ -146,38 +146,63 @@ EngineProtocolParser::parseOption(const std::string &line) {
     opt.type = EngineOptionType::Spin;
     std::string tok;
     while (ss >> tok) {
-      if (tok == "default") { ss >> opt.spinVal; }
-      else if (tok == "min") { ss >> opt.spinMin; }
-      else if (tok == "max") { ss >> opt.spinMax; }
+      if (tok == "default") {
+        ss >> opt.spinVal;
+      } else if (tok == "min") {
+        ss >> opt.spinMin;
+      } else if (tok == "max") {
+        ss >> opt.spinMax;
+      }
     }
   } else if (typeStr == "combo") {
     opt.type = EngineOptionType::Combo;
     std::string tok;
-    bool inDefault = false, inVar = false;
+    bool        inDefault = false, inVar = false;
     std::string varAccum;
     while (ss >> tok) {
-      if (tok == "default") { inDefault = true; inVar = false; continue; }
-      if (tok == "var")     { inVar = true; inDefault = false;
-                              if (!varAccum.empty()) { opt.comboVars.push_back(varAccum); varAccum.clear(); }
-                              continue; }
-      if (inDefault) { opt.strVal = tok; inDefault = false; continue; }
+      if (tok == "default") {
+        inDefault = true;
+        inVar     = false;
+        continue;
+      }
+      if (tok == "var") {
+        inVar     = true;
+        inDefault = false;
+        if (!varAccum.empty()) {
+          opt.comboVars.push_back(varAccum);
+          varAccum.clear();
+        }
+        continue;
+      }
+      if (inDefault) {
+        opt.strVal = tok;
+        inDefault  = false;
+        continue;
+      }
       if (inVar) {
-        if (!varAccum.empty()) varAccum += ' ';
+        if (!varAccum.empty())
+          varAccum += ' ';
         varAccum += tok;
       }
     }
-    if (!varAccum.empty()) opt.comboVars.push_back(varAccum);
+    if (!varAccum.empty())
+      opt.comboVars.push_back(varAccum);
   } else if (typeStr == "button") {
     opt.type = EngineOptionType::Button;
   } else {
     // string (and unknown types)
     opt.type = EngineOptionType::String;
     std::string tok;
-    bool inDefault = false;
+    bool        inDefault = false;
     while (ss >> tok) {
-      if (tok == "default") { inDefault = true; opt.strVal.clear(); continue; }
+      if (tok == "default") {
+        inDefault = true;
+        opt.strVal.clear();
+        continue;
+      }
       if (inDefault) {
-        if (!opt.strVal.empty()) opt.strVal += ' ';
+        if (!opt.strVal.empty())
+          opt.strVal += ' ';
         opt.strVal += tok;
       }
     }

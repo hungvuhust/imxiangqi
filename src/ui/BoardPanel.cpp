@@ -56,7 +56,9 @@ void BoardPanel::onRender(AppContext &ctx) {
   if (ctx.hint.has_value())
     hintMove = ctx.hint->moveUcci;
 
-  renderer_.render(ctx.gameState, hintMove);
+  // Pass analyze snapshot only when actively analyzing (or snapshot non-empty)
+  const AnalyzeSnapshot &snap = ctx.engine.analyzeSnapshot();
+  renderer_.render(ctx.gameState, hintMove, snap);
 
   ImGui::End();
   ImGui::PopStyleVar();

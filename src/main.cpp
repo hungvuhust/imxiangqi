@@ -230,16 +230,17 @@ private:
       return;
     if (!gameState_.isPlaying())
       return;
-    if (isEngineTurn()) // still engine's turn after applying move? shouldn't happen
+    if (isEngineTurn()) // still engine's turn after applying move? shouldn't
+                        // happen
       return;
     if (!engine_.isReady())
       return;
 
     // Extract ponder move from last info's PV (first token after engine move)
     if (engine_.lastInfo() && !engine_.lastInfo()->pv.empty()) {
-      const std::string &pv = engine_.lastInfo()->pv;
+      const std::string &pv         = engine_.lastInfo()->pv;
       // PV starts with the ponder move (opponent's expected reply)
-      std::string ponderMove = pv.substr(0, pv.find(' '));
+      std::string        ponderMove = pv.substr(0, pv.find(' '));
       if (!ponderMove.empty())
         engine_.startPonder(gameState_, ponderMove);
     }

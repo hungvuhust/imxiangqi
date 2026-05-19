@@ -39,8 +39,8 @@ void ControlPanel::onRender(AppContext &ctx) {
   bool engineReady = ctx.settings.hasEngine() && ctx.engine.isReady();
 
   // Hint button
-  bool canHint = engineReady && ctx.gameState.isPlaying() &&
-                 !ctx.engine.isThinking();
+  bool canHint =
+      engineReady && ctx.gameState.isPlaying() && !ctx.engine.isThinking();
   ImGui::BeginDisabled(!canHint);
   if (ImGui::Button("Hint next move", {-1, 0}))
     ctx.engine.requestHint(ctx.gameState);
@@ -62,7 +62,7 @@ void ControlPanel::onRender(AppContext &ctx) {
   ImGui::Spacing();
 
   // Analyze mode toggle
-  bool analyzing = ctx.engine.isAnalyzing();
+  bool analyzing  = ctx.engine.isAnalyzing();
   bool canAnalyze = ctx.engine.isReady() || analyzing;
   ImGui::BeginDisabled(!canAnalyze);
   if (!analyzing) {

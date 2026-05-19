@@ -123,7 +123,8 @@ bool EngineController::startAnalyze(const GameState &game) {
 
   // Send MultiPV setoption before go infinite
   if (settings_.multiPv > 1)
-    sendLine("setoption name MultiPV value " + std::to_string(settings_.multiPv));
+    sendLine("setoption name MultiPV value " +
+             std::to_string(settings_.multiPv));
   else
     sendLine("setoption name MultiPV value 1");
 
@@ -147,8 +148,8 @@ void EngineController::stopAnalyze() {
 // Ponder
 // ---------------------------------------------------------------------------
 
-bool EngineController::startPonder(const GameState &game,
-                                    const std::string &ponderMoveUcci) {
+bool EngineController::startPonder(const GameState   &game,
+                                   const std::string &ponderMoveUcci) {
   if (state_ != EngineState::Ready || ponderMoveUcci.empty())
     return false;
   if (!settings_.ponder)
@@ -269,20 +270,21 @@ bool EngineController::beginSearch(const GameState  &game,
 
 void EngineController::updateAnalyzeSnapshot(const EngineInfo &info) {
   int idx = info.multipv - 1;
-  if (idx < 0) idx = 0;
+  if (idx < 0)
+    idx = 0;
 
   // Grow vector if needed
   if (idx >= static_cast<int>(analyzeSnapshot_.pvLines.size()))
     analyzeSnapshot_.pvLines.resize(idx + 1);
 
-  PvLine &pv     = analyzeSnapshot_.pvLines[idx];
-  pv.multipv     = info.multipv;
-  pv.depth       = info.depth;
-  pv.hasScoreCp  = info.hasScoreCp;
-  pv.scoreCp     = info.scoreCp;
-  pv.hasMate     = info.hasMate;
-  pv.mate        = info.mate;
-  pv.pv          = info.pv;
+  PvLine &pv    = analyzeSnapshot_.pvLines[idx];
+  pv.multipv    = info.multipv;
+  pv.depth      = info.depth;
+  pv.hasScoreCp = info.hasScoreCp;
+  pv.scoreCp    = info.scoreCp;
+  pv.hasMate    = info.hasMate;
+  pv.mate       = info.mate;
+  pv.pv         = info.pv;
 
   if (info.depth > analyzeSnapshot_.depth)
     analyzeSnapshot_.depth = info.depth;
@@ -303,8 +305,10 @@ void EngineController::handleEngineLine(const std::string &line) {
       // Skip internal-only options we manage ourselves
       if (opt->name != "UCI_Chess960" && opt->name != "UCI_Variant") {
         // Check if already exists (re-handshake scenario)
-        auto it = std::find_if(engineOptions_.begin(), engineOptions_.end(),
-                               [&](const EngineOption &o) { return o.name == opt->name; });
+        auto it = std::find_if(
+            engineOptions_.begin(),
+            engineOptions_.end(),
+            [&](const EngineOption &o) { return o.name == opt->name; });
         if (it == engineOptions_.end())
           engineOptions_.push_back(*opt);
       }
@@ -357,7 +361,8 @@ void EngineController::handleEngineLine(const std::string &line) {
 
   // --- bestmove ---
   auto best =
-      EngineProtocolParser::parseBestMove(line, lastInfo_.value_or(EngineInfo{}));
+      EngineProtocolParser::parseBestMove(line,
+                                          lastInfo_.value_or(EngineInfo{}));
   if (!best)
     return;
 

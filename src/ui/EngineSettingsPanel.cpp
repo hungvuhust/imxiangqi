@@ -152,14 +152,18 @@ void EngineSettingsPanel::onRender(AppContext &ctx) {
       case EngineOptionType::Combo: {
         // Build items array
         std::vector<const char *> items;
-        for (auto &var : opt.comboVars)
-          items.push_back(var.c_str());
+        for (auto &var : opt.comboVars) items.push_back(var.c_str());
         int curIdx = 0;
         for (int i = 0; i < static_cast<int>(opt.comboVars.size()); ++i) {
-          if (opt.comboVars[i] == opt.strVal) { curIdx = i; break; }
+          if (opt.comboVars[i] == opt.strVal) {
+            curIdx = i;
+            break;
+          }
         }
-        if (ImGui::Combo(opt.name.c_str(), &curIdx,
-                         items.data(), static_cast<int>(items.size()))) {
+        if (ImGui::Combo(opt.name.c_str(),
+                         &curIdx,
+                         items.data(),
+                         static_cast<int>(items.size()))) {
           if (curIdx < static_cast<int>(opt.comboVars.size())) {
             opt.strVal = opt.comboVars[curIdx];
             opt.dirty  = true;
@@ -172,7 +176,9 @@ void EngineSettingsPanel::onRender(AppContext &ctx) {
         // Use a small local buffer per option (128 chars)
         char buf[128] = {};
         std::strncpy(buf, opt.strVal.c_str(), sizeof(buf) - 1);
-        if (ImGui::InputText(opt.name.c_str(), buf, sizeof(buf),
+        if (ImGui::InputText(opt.name.c_str(),
+                             buf,
+                             sizeof(buf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
           opt.strVal = buf;
           opt.dirty  = true;
