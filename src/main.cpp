@@ -51,7 +51,10 @@ public:
   ~Application() { shutdown(); }
 
   bool init(const char *argv0) {
-    return initSDL() && initImGui() && loadAssets(argv0) && buildPanels();
+    if (!initSDL() || !initImGui() || !loadAssets(argv0) || !buildPanels())
+      return false;
+    registerGameEventListener();
+    return true;
   }
 
   void run() {
@@ -79,6 +82,9 @@ private:
 
   std::chrono::steady_clock::time_point undoDelayUntil_{};
   static constexpr auto UNDO_RESTART_DELAY = std::chrono::seconds(3);
+
+  int  gameEventListenerId_   = -1;
+  bool pendingAnalyzeRestart_ = false;
 
   bool initSDL() {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
@@ -164,6 +170,59 @@ private:
     panels_.emplace_back(std::make_unique<EngineSettingsPanel>());
     panels_.emplace_back(std::make_unique<EngineLogPanel>());
     return true;
+  }
+
+  // -----------------------------------------------------------------------
+  //  Game event system – single subscriber that owns all engine reactions
+  // -----------------------------------------------------------------------
+  void registerGameEventListener() {
+    gameEventListenerId_ = gameState_.addGameEventListener(
+        [this](const GameEvent &ev) { onGameEvent(ev); });
+  }
+
+  void onGameEvent(const GameEvent &ev) {
+    switch (ev.kind) {
+
+    case GameEventKind::MoveMade:
+      lastHint_.reset();
+      // If analyze mode is active, stop and re-queue restart on new position
+      if (engine_.isAnalyzing()) {
+        engine_.stopAnalyze(); // sends "stop"; engine will reply with bestmove
+        pendingAnalyzeRestart_ = true; // re-start once Ready
+      }
+      // Ponder / engine-move requests are handled by maybeRequestEngineMove()
+      break;
+
+    case GameEventKind::MoveUndone: {
+      lastHint_.reset();
+      bool wasAnalyzing = engine_.isAnalyzing();
+      engine_.stopAnalyze();
+      engine_.stopPonder();
+      engine_.cancelThinking();
+      pendingAnalyzeRestart_ = wasAnalyzing;
+      undoDelayUntil_ =
+          std::chrono::steady_clock::now() + UNDO_RESTART_DELAY;
+      break;
+    }
+
+    case GameEventKind::GameReset:
+    case GameEventKind::FenLoaded: {
+      lastHint_.reset();
+      bool wasAnalyzing = engine_.isAnalyzing();
+      engine_.stopAnalyze();
+      engine_.stopPonder();
+      engine_.cancelThinking();
+      pendingAnalyzeRestart_ = wasAnalyzing;
+      break;
+    }
+
+    case GameEventKind::GameOver:
+      engine_.stopAnalyze();
+      engine_.stopPonder();
+      engine_.cancelThinking();
+      pendingAnalyzeRestart_ = false;
+      break;
+    }
   }
 
   bool isEngineTurn() const {
@@ -287,20 +346,11 @@ private:
       if (e.type == SDL_KEYDOWN) {
         switch (e.key.keysym.sym) {
         case SDLK_n:
-          gameState_.newGame();
-          engine_.stopAnalyze();
-          engine_.stopPonder();
-          engine_.cancelThinking();
+          gameState_.newGame(); // → GameReset event → onGameEvent handles engine
           break;
         case SDLK_z:
-          if (gameState_.canUndo()) {
-            gameState_.undoMove();
-            engine_.stopAnalyze();
-            engine_.stopPonder();
-            engine_.cancelThinking();
-            undoDelayUntil_ =
-                std::chrono::steady_clock::now() + UNDO_RESTART_DELAY;
-          }
+          if (gameState_.canUndo())
+            gameState_.undoMove(); // → MoveUndone event → onGameEvent handles engine
           break;
         case SDLK_ESCAPE: quit_ = true; break;
         default: break;
@@ -313,6 +363,13 @@ private:
     engine_.configure(settings_.engine);
     engine_.update(gameState_);
     consumeEngineOutputs();
+
+    // Restart analyze once engine returns to Ready after a position change
+    if (pendingAnalyzeRestart_ && engine_.isReady()) {
+      pendingAnalyzeRestart_ = false;
+      engine_.startAnalyze(gameState_);
+    }
+
     maybeRequestEngineMove();
 
     AppContext ctx{gameState_, settings_, engine_, texMgr_, lastHint_};
@@ -348,18 +405,10 @@ private:
       return;
 
     if (ImGui::BeginMenu("Game")) {
-      if (ImGui::MenuItem("New Game", "N")) {
-        gameState_.newGame();
-        engine_.stopAnalyze();
-        engine_.stopPonder();
-        engine_.cancelThinking();
-      }
-      if (ImGui::MenuItem("Undo Move", "Z") && gameState_.canUndo()) {
-        gameState_.undoMove();
-        engine_.stopAnalyze();
-        engine_.stopPonder();
-        engine_.cancelThinking();
-      }
+      if (ImGui::MenuItem("New Game", "N"))
+        gameState_.newGame(); // → event → onGameEvent
+      if (ImGui::MenuItem("Undo Move", "Z") && gameState_.canUndo())
+        gameState_.undoMove(); // → event → onGameEvent
       ImGui::Separator();
       if (ImGui::MenuItem("Quit", "ESC"))
         quit_ = true;

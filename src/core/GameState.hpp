@@ -3,6 +3,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace XiangQi {
 
@@ -15,6 +16,28 @@ enum class GameStatus {
   BlackWins,
   Draw, // reserved for future 60-move rule / repetition
 };
+
+// -----------------------------------------------------------------------
+//  GameEvent  – discrete state-change notifications
+//
+//  Emitted by GameState after the change is fully applied.
+//  Subscribers must not mutate GameState inside a listener.
+// -----------------------------------------------------------------------
+enum class GameEventKind {
+  MoveMade,      // a move was applied (human or engine)
+  MoveUndone,    // last move was taken back
+  GameReset,     // newGame() called
+  FenLoaded,     // loadFen() called
+  GameOver,      // checkmate / stalemate reached
+};
+
+struct GameEvent {
+  GameEventKind      kind;
+  std::optional<Move> move;       // set for MoveMade
+  GameStatus          status{};   // set for GameOver
+};
+
+using GameEventListener = std::function<void(const GameEvent &)>;
 
 // -----------------------------------------------------------------------
 //  SelectionState  – what the user currently has selected
@@ -107,6 +130,15 @@ public:
     onStatusChanged_ = std::move(cb);
   }
 
+  // ------------------------------------------------------------------
+  //  Event system  – subscribe once, receive all game events
+  //
+  //  Returns an opaque listener ID that can later be passed to
+  //  removeGameEventListener() to unsubscribe.
+  // ------------------------------------------------------------------
+  int  addGameEventListener(GameEventListener listener);
+  void removeGameEventListener(int id);
+
 private:
   Board      board_;
   GameStatus status_ = GameStatus::Playing;
@@ -114,6 +146,16 @@ private:
 
   MoveCallback   onMoveMade_;
   StatusCallback onStatusChanged_;
+
+  // Event system
+  struct ListenerEntry {
+    int               id;
+    GameEventListener fn;
+  };
+  std::vector<ListenerEntry> listeners_;
+  int                        nextListenerId_ = 0;
+
+  void emit(const GameEvent &event) const;
 
   // Re-evaluate game status after a move
   void updateStatus();
