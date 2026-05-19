@@ -233,7 +233,8 @@ void SettingsDialog::tabEngine(AppContext &ctx) {
     ImGui::PushID(i);
     bool removed = renderOneEngine(i, ctx);
     ImGui::PopID();
-    if (removed) break; // bufs_ was invalidated; skip remaining this frame
+    if (removed)
+      break; // bufs_ was invalidated; skip remaining this frame
     ImGui::Spacing();
   }
   ImGui::EndChild();
@@ -265,7 +266,7 @@ bool SettingsDialog::renderOneEngine(int idx, AppContext &ctx) {
     ImGui::SameLine();
     if (ImGui::SmallButton("Yes##delyes")) {
       pool.removeEngine(idx);
-      bufsInit_      = false;
+      bufsInit_ = false;
       syncBuffers(pool); // resize bufs_ immediately so it stays valid
       deleteConfirm_ = -1;
       return true; // idx is now invalid; caller must break loop

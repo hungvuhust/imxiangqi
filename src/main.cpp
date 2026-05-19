@@ -307,15 +307,27 @@ private:
   void consumeEngineOutputs() {
     auto now = std::chrono::steady_clock::now();
 
+    // activeEngine() = engine của bên đang đến lượt (có thể nullptr = Human)
+    EngineController *turnEng = activeEngine();
+
     forEachEngine([&](EngineController &eng, int /*i*/) {
+      // Hints: chấp nhận từ bất kỳ engine nào (analyze mode)
       EngineSuggestion hint;
       if (eng.consumePendingHint(hint)) {
         if (now >= undoDelayUntil_)
           lastHint_ = hint;
       }
 
+      // Bestmove: chỉ chấp nhận từ engine của bên đang đến lượt
       std::string moveUcci;
       if (eng.consumePendingMoveUcci(moveUcci)) {
+        if (&eng != turnEng) {
+          // Nước từ engine không phải lượt này → bỏ qua (ponder bị hủy, v.v.)
+          eng.log().push(EngineLogDir::Sys,
+                         "ignoring bestmove (not this side's turn): " +
+                             moveUcci);
+          return;
+        }
         if (now < undoDelayUntil_) {
           eng.log().push(EngineLogDir::Sys,
                          "ignoring engine move during undo delay: " + moveUcci);
@@ -327,9 +339,8 @@ private:
     });
 
     if (!pendingEngineMove_.empty() && now >= pendingEngineMoveAt_) {
-      std::string       moveUcci = pendingEngineMove_;
-      EngineController *justMovedEng =
-          activeEngine(); // bên đang đến lượt trước apply
+      std::string       moveUcci     = pendingEngineMove_;
+      EngineController *justMovedEng = activeEngine(); // trước khi apply
       pendingEngineMove_.clear();
 
       if (!tryApplyEngineMoveUcci(moveUcci)) {
@@ -373,9 +384,12 @@ private:
   void maybeRequestEngineMove() {
     if (!gameState_.isPlaying())
       return;
+    if (!pendingEngineMove_.empty())
+      return; // đang chờ hiển thị nước đi, chưa apply
+
     EngineController *eng = activeEngine();
     if (!eng)
-      return; // Human's turn
+      return; // lượt của Human
 
     if (std::chrono::steady_clock::now() < undoDelayUntil_)
       return;
