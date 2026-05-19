@@ -1,6 +1,8 @@
 #include "EngineLogPanel.hpp"
+#include "../engine/EnginePool.hpp"
 
 #include <imgui.h>
+#include <string>
 
 namespace XiangQi {
 
@@ -16,8 +18,38 @@ void EngineLogPanel::onRender(AppContext &ctx) {
     return;
   }
 
+  // Chọn engine để xem log – dùng tất cả engine trong pool
+  EnginePool &pool = ctx.settings.pool;
+  if (ImGui::BeginTabBar("##eng-log-tabs")) {
+    for (int i = 0; i < (int)pool.entries.size(); ++i) {
+      auto       &e     = pool.entries[i];
+      std::string label = e.displayName.empty()
+                              ? ("Engine " + std::to_string(i))
+                              : e.displayName;
+      // Đánh dấu phía được giao
+      if (pool.redIdx == i)
+        label += " [R]";
+      if (pool.blackIdx == i)
+        label += " [B]";
+      if (ImGui::BeginTabItem(label.c_str())) {
+        activeLog_ = e.ctrl.get();
+        ImGui::EndTabItem();
+      }
+    }
+    ImGui::EndTabBar();
+  }
+  // Fallback: nếu chưa chọn hoặc pool rỗng
+  if (!activeLog_ && !pool.entries.empty())
+    activeLog_ = pool.entries[0].ctrl.get();
+
+  if (!activeLog_) {
+    ImGui::TextDisabled("No engines configured.");
+    ImGui::End();
+    return;
+  }
+
   if (ImGui::Button("Clear"))
-    ctx.engine.log().clear();
+    activeLog_->log().clear();
   ImGui::SameLine();
   ImGui::Checkbox("Auto-scroll", &autoScroll_);
 
@@ -32,7 +64,7 @@ void EngineLogPanel::onRender(AppContext &ctx) {
 
   ImGui::Separator();
 
-  auto lines = ctx.engine.log().snapshot();
+  auto lines = activeLog_->log().snapshot();
 
   ImGui::BeginChild("##engine-log-scroll",
                     ImVec2(0, 0),

@@ -1,10 +1,12 @@
 #pragma once
 #include "../core/GameState.hpp"
+#include "../engine/EngineTypes.hpp"
 #include "TextureManager.hpp"
 
 #include <imgui.h>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace XiangQi {
 
@@ -40,8 +42,12 @@ public:
 
   // Main render call – draws the board inside current ImGui window.
   // hintMoveUcci format: "a0a1" (optional).
+  // analyzeSnapshot: live MultiPV data; pass empty snapshot to skip arrows.
+  // allowInput: if false, mouse clicks are ignored (engine's turn).
   void render(GameState                        &gameState,
-              const std::optional<std::string> &hintMoveUcci = std::nullopt);
+              const std::optional<std::string> &hintMoveUcci    = std::nullopt,
+              const AnalyzeSnapshot            &analyzeSnapshot = {},
+              bool                              allowInput      = true);
 
   Config &config() { return config_; }
 
@@ -115,9 +121,15 @@ private:
   void drawPieces(ImDrawList *dl, ImVec2 boardOrigin, const Board &board) const;
   void drawOnePiece(ImDrawList *dl, ImVec2 center, const Piece &piece) const;
   void drawCoordinates(ImDrawList *dl, ImVec2 boardOrigin) const;
+  void drawLastMoveConnector(ImDrawList      *dl,
+                             ImVec2           boardOrigin,
+                             const GameState &gs) const;
   void drawHintArrow(ImDrawList                       *dl,
                      ImVec2                            boardOrigin,
                      const std::optional<std::string> &hintMoveUcci) const;
+  void drawPvArrows(ImDrawList            *dl,
+                    ImVec2                 boardOrigin,
+                    const AnalyzeSnapshot &snap) const;
 
   // Fallback: draw piece as colored circle with text label
   void drawPieceFallback(ImDrawList  *dl,

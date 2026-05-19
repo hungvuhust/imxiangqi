@@ -1,6 +1,5 @@
 #pragma once
-#include "../engine/EngineSettings.hpp"
-#include "../engine/EngineTypes.hpp"
+#include "../engine/EnginePool.hpp"
 #include <string>
 
 namespace XiangQi {
@@ -14,37 +13,26 @@ enum class BoardTheme {
 };
 
 // -----------------------------------------------------------------------
-//  GameSettings  – serialisable plain-data struct
+//  GameSettings  – serialisable config that survives a "New Game"
 //
-//  Owns all user-configurable state that survives a "New Game":
-//    - who plays Red / Black
-//    - engine configuration
-//    - board visual options
-//    - coordinate display
-//
-//  Non-persistent runtime state (selection, move history, etc.)
-//  lives in GameState, not here.
+//  Player assignment lives in pool.redIdx / pool.blackIdx:
+//    -1  → Human
+//    >=0 → index into pool.entries[]
 // -----------------------------------------------------------------------
 struct GameSettings {
   // ------------------------------------------------------------------
-  //  Player configuration
+  //  Engine pool  (owns N EngineController instances)
   // ------------------------------------------------------------------
-  PlayerMode redPlayer   = PlayerMode::Human;
-  PlayerMode blackPlayer = PlayerMode::Human;
-
-  // ------------------------------------------------------------------
-  //  Engine configuration  (used when PlayerMode == Engine)
-  // ------------------------------------------------------------------
-  EngineSettings engine;
+  EnginePool pool;
 
   // ------------------------------------------------------------------
   //  Board visual
   // ------------------------------------------------------------------
   BoardTheme theme        = BoardTheme::Classic;
-  float      pieceScale   = 0.85f; // fraction of cell occupied by piece
-  bool       flipBoard    = false; // Black at bottom if true
-  bool       showCoords   = true;  // show a-i / 0-9 labels
-  bool       animateMoves = true;  // piece slide animation (future)
+  float      pieceScale   = 0.85f;
+  bool       flipBoard    = false;
+  bool       showCoords   = true;
+  bool       animateMoves = true;
   float      animSpeedMs  = 120.0f;
 
   // ------------------------------------------------------------------
@@ -59,23 +47,30 @@ struct GameSettings {
   Color4 colCheck    = {1.0f, 0.2f, 0.1f, 0.55f};
 
   // ------------------------------------------------------------------
-  //  Helpers
+  //  Helpers (delegate to pool)
   // ------------------------------------------------------------------
-  bool isTwoPlayer() const {
-    return redPlayer == PlayerMode::Human && blackPlayer == PlayerMode::Human;
-  }
-  bool hasEngine() const {
-    return redPlayer == PlayerMode::Engine || blackPlayer == PlayerMode::Engine;
-  }
+  bool hasEngine() const { return pool.hasAnyEngine(); }
 
-  // Simple serialisation to / from INI-style string (for future save/load)
+  // Serialisation
   std::string         serialize() const;
   static GameSettings deserialize(const std::string &data);
 
-  // Reset to factory defaults
+  // Reset to factory defaults (keeps pool entries but stops all engines)
   void reset() {
-    *this = GameSettings{};
-    engine.reset();
+    pool.stopAll();
+    pool.entries.clear();
+    pool.redIdx   = -1;
+    pool.blackIdx = -1;
+    theme         = BoardTheme::Classic;
+    pieceScale    = 0.85f;
+    flipBoard     = false;
+    showCoords    = true;
+    animateMoves  = true;
+    animSpeedMs   = 120.0f;
+    colSelected   = {1.0f, 0.85f, 0.0f, 0.70f};
+    colLegal      = {0.2f, 0.8f, 0.3f, 0.55f};
+    colLastMove   = {0.3f, 0.6f, 1.0f, 0.45f};
+    colCheck      = {1.0f, 0.2f, 0.1f, 0.55f};
   }
 };
 

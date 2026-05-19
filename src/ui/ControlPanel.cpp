@@ -1,6 +1,8 @@
 #include "ControlPanel.hpp"
+#include "../engine/EnginePool.hpp"
 #include <cstring>
 #include <imgui.h>
+#include <vector>
 
 namespace XiangQi {
 
@@ -12,6 +14,21 @@ ControlPanel::ControlPanel()
       sizeof(fenBuf_) - 1);
 }
 
+// Helper: render a "side assignment" row (Red or Black)
+// Returns true if assignment changed.
+static void
+renderSideAssignment(const char *label, int &idxRef, EnginePool &pool) {
+  auto names = pool.comboNames(); // ["Human", eng0, eng1, ...]
+  std::vector<const char *> items;
+  items.reserve(names.size());
+  for (auto &n : names) items.push_back(n.c_str());
+
+  int combo = pool.idxToCombo(idxRef); // -1→0, 0→1, ...
+  ImGui::SetNextItemWidth(-1);
+  if (ImGui::Combo(label, &combo, items.data(), (int)items.size()))
+    idxRef = pool.comboToIdx(combo);
+}
+
 void ControlPanel::onRender(AppContext &ctx) {
   if (!open_)
     return;
@@ -20,6 +37,17 @@ void ControlPanel::onRender(AppContext &ctx) {
     ImGui::End();
     return;
   }
+
+  // --- Players ------------------------------------------------------------
+  ImGui::SeparatorText("Players");
+
+  EnginePool &pool = ctx.settings.pool;
+
+  ImGui::TextUnformatted("Red (South)");
+  renderSideAssignment("##redPlayer", pool.redIdx, pool);
+
+  ImGui::TextUnformatted("Black (North)");
+  renderSideAssignment("##blackPlayer", pool.blackIdx, pool);
 
   // --- Game actions -------------------------------------------------------
   ImGui::SeparatorText("Game");
@@ -36,12 +64,15 @@ void ControlPanel::onRender(AppContext &ctx) {
   // --- Engine -------------------------------------------------------------
   ImGui::SeparatorText("Engine");
 
-  bool canHint = ctx.settings.hasEngine() && ctx.gameState.isPlaying() &&
-                 ctx.engine.isReady() && !ctx.engine.isThinking();
+  EngineController *activeEng   = ctx.activeEngine();
+  bool              engineReady = activeEng && activeEng->isReady();
+
+  // Hint button (engine của bên đang đến lượt)
+  bool canHint =
+      engineReady && ctx.gameState.isPlaying() && !activeEng->isThinking();
   ImGui::BeginDisabled(!canHint);
-  if (ImGui::Button("Hint next move", {-1, 0})) {
-    ctx.engine.requestHint(ctx.gameState);
-  }
+  if (ImGui::Button("Hint next move", {-1, 0}))
+    activeEng->requestHint(ctx.gameState);
   ImGui::EndDisabled();
 
   if (ctx.hint.has_value()) {
@@ -52,9 +83,30 @@ void ControlPanel::onRender(AppContext &ctx) {
     if (h.info.hasScoreCp)
       ImGui::Text("Score cp: %d", h.info.scoreCp);
     if (h.info.hasMate)
-      ImGui::Text("Mate: %d", h.info.mate);
+      ImGui::Text("Mate in: %d", h.info.mate);
     if (!h.info.pv.empty())
       ImGui::TextWrapped("PV: %s", h.info.pv.c_str());
+  }
+
+  ImGui::Spacing();
+
+  // Analyze mode – dùng engine Red (hoặc engine đầu tiên trong pool)
+  EngineController *analyzeEng = pool.redEngine();
+  if (!analyzeEng && !pool.entries.empty())
+    analyzeEng = pool.entries[0].ctrl.get();
+
+  if (analyzeEng) {
+    bool analyzing  = analyzeEng->isAnalyzing();
+    bool canAnalyze = analyzeEng->isReady() || analyzing;
+    ImGui::BeginDisabled(!canAnalyze);
+    if (!analyzing) {
+      if (ImGui::Button("Start Analysis", {-1, 0}))
+        analyzeEng->startAnalyze(ctx.gameState);
+    } else {
+      if (ImGui::Button("Stop Analysis", {-1, 0}))
+        analyzeEng->stopAnalyze();
+    }
+    ImGui::EndDisabled();
   }
 
   // --- View ---------------------------------------------------------------
@@ -91,11 +143,8 @@ void ControlPanel::onRender(AppContext &ctx) {
   if (fenError_)
     ImGui::TextColored({1, 0.3f, 0.3f, 1}, "Invalid or empty FEN.");
 
-  // Copy current FEN button
-  if (ImGui::Button("Copy current FEN", {-1, 0})) {
-    std::string fen = ctx.gameState.toFen();
-    ImGui::SetClipboardText(fen.c_str());
-  }
+  if (ImGui::Button("Copy current FEN", {-1, 0}))
+    ImGui::SetClipboardText(ctx.gameState.toFen().c_str());
 
   ImGui::End();
 }
