@@ -102,8 +102,9 @@ struct PvLine {
 
 // Live analysis snapshot (updated every info line)
 struct AnalyzeSnapshot {
-  std::vector<PvLine> pvLines;    // indexed by multipv-1
-  int                 depth = -1; // max depth seen
+  std::vector<PvLine> pvLines;        // indexed by multipv-1
+  int                 depth    = -1;  // max depth seen
+  bool                redToMove = true; // whose turn it is when analysis started
 };
 
 struct EngineLogEntry {

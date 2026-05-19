@@ -114,8 +114,9 @@ bool EngineController::startAnalyze(const GameState &game) {
   if (state_ != EngineState::Ready)
     return false;
 
-  // Reset snapshot
-  analyzeSnapshot_ = AnalyzeSnapshot{};
+  // Reset snapshot, record whose turn it is for colour-coding arrows
+  analyzeSnapshot_           = AnalyzeSnapshot{};
+  analyzeSnapshot_.redToMove = (game.sideToMove() == PieceColor::Red);
 
   std::string fen = game.toFen();
   if (!sendLine("position fen " + fen))

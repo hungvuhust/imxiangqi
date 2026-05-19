@@ -24,17 +24,17 @@ enum class GameStatus {
 //  Subscribers must not mutate GameState inside a listener.
 // -----------------------------------------------------------------------
 enum class GameEventKind {
-  MoveMade,      // a move was applied (human or engine)
-  MoveUndone,    // last move was taken back
-  GameReset,     // newGame() called
-  FenLoaded,     // loadFen() called
-  GameOver,      // checkmate / stalemate reached
+  MoveMade,   // a move was applied (human or engine)
+  MoveUndone, // last move was taken back
+  GameReset,  // newGame() called
+  FenLoaded,  // loadFen() called
+  GameOver,   // checkmate / stalemate reached
 };
 
 struct GameEvent {
-  GameEventKind      kind;
-  std::optional<Move> move;       // set for MoveMade
-  GameStatus          status{};   // set for GameOver
+  GameEventKind       kind;
+  std::optional<Move> move;     // set for MoveMade
+  GameStatus          status{}; // set for GameOver
 };
 
 using GameEventListener = std::function<void(const GameEvent &)>;

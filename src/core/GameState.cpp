@@ -46,8 +46,7 @@ void GameState::removeGameEventListener(int id) {
 }
 
 void GameState::emit(const GameEvent &event) const {
-  for (const auto &entry : listeners_)
-    entry.fn(event);
+  for (const auto &entry : listeners_) entry.fn(event);
 }
 
 // =======================================================================

@@ -200,8 +200,7 @@ private:
       engine_.stopPonder();
       engine_.cancelThinking();
       pendingAnalyzeRestart_ = wasAnalyzing;
-      undoDelayUntil_ =
-          std::chrono::steady_clock::now() + UNDO_RESTART_DELAY;
+      undoDelayUntil_ = std::chrono::steady_clock::now() + UNDO_RESTART_DELAY;
       break;
     }
 
@@ -346,11 +345,13 @@ private:
       if (e.type == SDL_KEYDOWN) {
         switch (e.key.keysym.sym) {
         case SDLK_n:
-          gameState_.newGame(); // → GameReset event → onGameEvent handles engine
+          gameState_
+              .newGame(); // → GameReset event → onGameEvent handles engine
           break;
         case SDLK_z:
           if (gameState_.canUndo())
-            gameState_.undoMove(); // → MoveUndone event → onGameEvent handles engine
+            gameState_
+                .undoMove(); // → MoveUndone event → onGameEvent handles engine
           break;
         case SDLK_ESCAPE: quit_ = true; break;
         default: break;
