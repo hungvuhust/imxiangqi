@@ -18,117 +18,16 @@ std::string defaultPickerPath(const std::string &enginePath) {
   return p.has_parent_path() ? p.parent_path().string() : enginePath;
 }
 
-} // namespace
-
-namespace XiangQi {
-
-static constexpr const char *POPUP_ID = "Settings##modal";
-
-void SettingsDialog::open() {
-  pendingOpen_ = true;
-  bufInit_     = false; // re-sync buffers với settings hiện tại
-}
-
-void SettingsDialog::syncBuffers(const GameSettings &s) {
-  if (bufInit_)
-    return;
-  std::strncpy(pathBufRed_, s.engineRed.path.c_str(), sizeof(pathBufRed_) - 1);
-  std::strncpy(nameBufRed_, s.engineRed.name.c_str(), sizeof(nameBufRed_) - 1);
-  std::strncpy(pathBufBlack_,
-               s.engineBlack.path.c_str(),
-               sizeof(pathBufBlack_) - 1);
-  std::strncpy(nameBufBlack_,
-               s.engineBlack.name.c_str(),
-               sizeof(nameBufBlack_) - 1);
-  bufInit_ = true;
-}
-
-bool SettingsDialog::browseEnginePath(EngineSettings &s,
-                                      char           *pathBuf,
-                                      size_t          pathBufSize) {
-  pfd::open_file picker("Select engine binary",
-                        defaultPickerPath(s.path),
-                        {"All Files", "*"},
-                        pfd::opt::none);
-  auto           files = picker.result();
-  if (files.empty())
-    return false;
-  std::strncpy(pathBuf, files[0].c_str(), pathBufSize - 1);
-  pathBuf[pathBufSize - 1] = '\0';
-  s.path                   = pathBuf;
-  return true;
-}
-
-// ---------------------------------------------------------------------------
-void SettingsDialog::render(AppContext &ctx) {
-  // OpenPopup phải gọi cùng level với BeginPopupModal (không nằm trong Begin)
-  if (pendingOpen_) {
-    ImGui::OpenPopup(POPUP_ID);
-    pendingOpen_ = false;
-  }
-
-  // Center popup lần đầu
-  ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-  ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {0.5f, 0.5f});
-  ImGui::SetNextWindowSize({620, 520}, ImGuiCond_Appearing);
-
-  if (!ImGui::BeginPopupModal(POPUP_ID, nullptr, ImGuiWindowFlags_NoResize))
-    return;
-
-  if (ImGui::BeginTabBar("##settings_tabs")) {
-    if (ImGui::BeginTabItem("General")) {
-      tabGeneral(ctx);
-      ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("Engine")) {
-      tabEngine(ctx);
-      ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("Board")) {
-      tabBoard(ctx);
-      ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("Colors")) {
-      tabColors(ctx);
-      ImGui::EndTabItem();
-    }
-    ImGui::EndTabBar();
-  }
-
-  ImGui::Separator();
-
-  // Footer: Reset + Close
-  if (!confirmReset_) {
-    if (ImGui::Button("Reset to defaults"))
-      confirmReset_ = true;
-  } else {
-    ImGui::TextColored({1.f, 0.4f, 0.2f, 1.f}, "Reset all settings?");
-    ImGui::SameLine();
-    if (ImGui::Button("Yes")) {
-      ctx.settings.reset();
-      bufInit_      = false;
-      confirmReset_ = false;
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel##reset"))
-      confirmReset_ = false;
-  }
-
-  ImGui::SameLine(ImGui::GetContentRegionAvail().x - 50);
-  if (ImGui::Button("Close", {55, 0}))
-    ImGui::CloseCurrentPopup();
-
-  ImGui::EndPopup();
-}
-
-// ---------------------------------------------------------------------------
-// Helper: render engine options for one engine
-static void renderEngineOptions(EngineController &eng) {
+// Render engine dynamic options list; returns true if any dirty option
+static bool renderEngineOptions(XiangQi::EngineController &eng) {
+  using namespace XiangQi;
   auto &opts = eng.engineOptions();
   if (opts.empty())
-    return;
+    return false;
+
   ImGui::SeparatorText("Engine Options");
   bool anyDirty = false;
+
   for (auto &opt : opts) {
     ImGui::PushID(opt.name.c_str());
     switch (opt.type) {
@@ -160,12 +59,11 @@ static void renderEngineOptions(EngineController &eng) {
       if (ImGui::Combo(opt.name.c_str(),
                        &curIdx,
                        items.data(),
-                       (int)items.size())) {
+                       (int)items.size()))
         if (curIdx < (int)opt.comboVars.size()) {
           opt.strVal = opt.comboVars[curIdx];
           opt.dirty = anyDirty = true;
         }
-      }
       break;
     }
     case EngineOptionType::String: {
@@ -194,35 +92,230 @@ static void renderEngineOptions(EngineController &eng) {
     if (ImGui::Button("Apply options", {-1, 0}))
       eng.flushDirtyOptions();
   }
+  return anyDirty;
 }
 
-void SettingsDialog::renderEngineSettings(const char       *label,
-                                          EngineSettings   &s,
-                                          EngineController &eng,
-                                          char             *pathBuf,
-                                          size_t            pathBufSize,
-                                          char             *nameBuf,
-                                          size_t            nameBufSize) {
-  ImGui::SeparatorText(label);
+} // namespace
 
-  // Unique ID suffix per side
-  auto id = [&](const char *base) { return std::string(base) + "##" + label; };
+namespace XiangQi {
 
+static constexpr const char *POPUP_ID = "Settings##modal";
+
+void SettingsDialog::open() {
+  pendingOpen_ = true;
+  bufsInit_    = false;
+}
+
+// -----------------------------------------------------------------------
+void SettingsDialog::syncBuffers(const EnginePool &pool) {
+  if (bufsInit_ && bufs_.size() == pool.entries.size())
+    return;
+  bufs_.resize(pool.entries.size());
+  for (int i = 0; i < (int)pool.entries.size(); ++i) {
+    auto &e = pool.entries[i];
+    std::strncpy(bufs_[i].path,
+                 e.settings.path.c_str(),
+                 sizeof(EngBufs::path) - 1);
+    std::strncpy(bufs_[i].name,
+                 e.displayName.c_str(),
+                 sizeof(EngBufs::name) - 1);
+  }
+  bufsInit_ = true;
+}
+
+// -----------------------------------------------------------------------
+void SettingsDialog::render(AppContext &ctx) {
+  if (pendingOpen_) {
+    ImGui::OpenPopup(POPUP_ID);
+    pendingOpen_ = false;
+  }
+
+  ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+  ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {0.5f, 0.5f});
+  ImGui::SetNextWindowSize({680, 560}, ImGuiCond_Appearing);
+
+  if (!ImGui::BeginPopupModal(POPUP_ID, nullptr, ImGuiWindowFlags_NoResize))
+    return;
+
+  if (ImGui::BeginTabBar("##settings_tabs")) {
+    if (ImGui::BeginTabItem("General")) {
+      tabGeneral(ctx);
+      ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Engine")) {
+      tabEngine(ctx);
+      ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Board")) {
+      tabBoard(ctx);
+      ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Colors")) {
+      tabColors(ctx);
+      ImGui::EndTabItem();
+    }
+    ImGui::EndTabBar();
+  }
+
+  ImGui::Separator();
+
+  if (!confirmReset_) {
+    if (ImGui::Button("Reset to defaults"))
+      confirmReset_ = true;
+  } else {
+    ImGui::TextColored({1.f, 0.4f, 0.2f, 1.f}, "Reset all settings?");
+    ImGui::SameLine();
+    if (ImGui::Button("Yes")) {
+      ctx.settings.reset();
+      bufsInit_     = false;
+      confirmReset_ = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel##reset"))
+      confirmReset_ = false;
+  }
+
+  ImGui::SameLine(ImGui::GetContentRegionAvail().x - 50);
+  if (ImGui::Button("Close", {55, 0}))
+    ImGui::CloseCurrentPopup();
+
+  ImGui::EndPopup();
+}
+
+// -----------------------------------------------------------------------
+void SettingsDialog::tabGeneral(AppContext &ctx) {
+  ImGui::SeparatorText("Info");
+  ImGui::TextWrapped(
+      "Configure player assignments in the Controls panel "
+      "(left sidebar). Use the Engine tab to manage engine "
+      "instances.");
+  ImGui::Spacing();
+  ImGui::SeparatorText("Board");
+  ImGui::SliderFloat("Piece scale",
+                     &ctx.settings.pieceScale,
+                     0.5f,
+                     1.0f,
+                     "%.2f");
+  ImGui::Checkbox("Flip board", &ctx.settings.flipBoard);
+  ImGui::Checkbox("Show coordinates", &ctx.settings.showCoords);
+  ImGui::Checkbox("Animate moves", &ctx.settings.animateMoves);
+  if (ctx.settings.animateMoves)
+    ImGui::SliderFloat("Anim speed (ms)",
+                       &ctx.settings.animSpeedMs,
+                       40.f,
+                       400.f,
+                       "%.0f");
+}
+
+// -----------------------------------------------------------------------
+void SettingsDialog::tabEngine(AppContext &ctx) {
+  EnginePool &pool = ctx.settings.pool;
+  syncBuffers(pool);
+
+  // New Engine button
+  if (ImGui::Button("+ New Engine", {-1, 0})) {
+    pool.addEngine();
+    bufsInit_ = false; // force re-sync
+  }
+
+  ImGui::Spacing();
+
+  if (pool.entries.empty()) {
+    ImGui::TextDisabled(
+        "No engines configured. Click '+ New Engine' to add one.");
+    return;
+  }
+
+  // Scrollable child for N engine panels
+  ImGui::BeginChild("##engine-list", {0, 0}, false);
+  for (int i = 0; i < (int)pool.entries.size(); ++i) {
+    ImGui::PushID(i);
+    renderOneEngine(i, ctx);
+    ImGui::PopID();
+    ImGui::Spacing();
+  }
+  ImGui::EndChild();
+}
+
+// -----------------------------------------------------------------------
+void SettingsDialog::renderOneEngine(int idx, AppContext &ctx) {
+  EnginePool        &pool = ctx.settings.pool;
+  EnginePool::Entry &e    = pool.entries[idx];
+  EngineController  &eng  = *e.ctrl;
+  EngBufs           &buf  = bufs_[idx];
+
+  // Header with collapse + delete
+  std::string headerLabel =
+      std::string("Engine: ") + (e.displayName.empty()
+                                     ? ("Engine " + std::to_string(idx))
+                                     : e.displayName);
+  bool open = ImGui::CollapsingHeader(headerLabel.c_str(),
+                                      ImGuiTreeNodeFlags_DefaultOpen);
+
+  // Delete button (right-aligned)
+  ImGui::SameLine(ImGui::GetContentRegionAvail().x - 30);
+  if (ImGui::SmallButton("X##del"))
+    deleteConfirm_ = idx;
+
+  if (deleteConfirm_ == idx) {
+    ImGui::TextColored({1.f, 0.4f, 0.2f, 1.f}, "Delete this engine?");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Yes##delyes")) {
+      pool.removeEngine(idx);
+      bufsInit_      = false;
+      deleteConfirm_ = -1;
+      return; // idx is now invalid
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("No##delno"))
+      deleteConfirm_ = -1;
+  }
+
+  if (!open)
+    return;
+
+  // Display name
+  if (ImGui::InputText("Display name",
+                       buf.name,
+                       sizeof(buf.name),
+                       ImGuiInputTextFlags_EnterReturnsTrue)) {
+    e.displayName   = buf.name;
+    e.settings.name = buf.name;
+    pool.ensureUniqueName(idx);
+    std::strncpy(buf.name, e.displayName.c_str(), sizeof(buf.name) - 1);
+  }
+
+  // Engine path + browse
   ImGui::SetNextItemWidth(-110);
-  if (ImGui::InputText(id("Engine path").c_str(), pathBuf, pathBufSize))
-    s.path = pathBuf;
+  if (ImGui::InputText("Engine path", buf.path, sizeof(buf.path)))
+    e.settings.path = buf.path;
   ImGui::SameLine();
-  if (ImGui::Button(id("Browse...").c_str(), {100, 0}))
-    browseEnginePath(s, pathBuf, pathBufSize);
+  if (ImGui::Button("Browse...", {100, 0})) {
+    pfd::open_file picker("Select engine binary",
+                          defaultPickerPath(e.settings.path),
+                          {"All Files", "*"},
+                          pfd::opt::none);
+    auto           files = picker.result();
+    if (!files.empty()) {
+      std::strncpy(buf.path, files[0].c_str(), sizeof(buf.path) - 1);
+      e.settings.path = buf.path;
+      // Auto-fill display name from filename if still empty
+      if (e.displayName.empty()) {
+        std::string stem = std::filesystem::path(files[0]).stem().string();
+        std::strncpy(buf.name, stem.c_str(), sizeof(buf.name) - 1);
+        e.displayName   = buf.name;
+        e.settings.name = buf.name;
+        pool.ensureUniqueName(idx);
+        std::strncpy(buf.name, e.displayName.c_str(), sizeof(buf.name) - 1);
+      }
+    }
+  }
 
-  if (ImGui::InputText(id("Engine name").c_str(), nameBuf, nameBufSize))
-    s.name = nameBuf;
-
-  ImGui::SliderInt(id("Depth").c_str(), &s.depth, 1, 30);
-  ImGui::SliderInt(id("Time (ms)").c_str(), &s.timeMs, 100, 10000);
-  ImGui::SliderInt(id("MultiPV").c_str(), &s.multiPv, 1, 5);
+  ImGui::SliderInt("Depth", &e.settings.depth, 1, 30);
+  ImGui::SliderInt("Time (ms)", &e.settings.timeMs, 100, 10000);
+  ImGui::SliderInt("MultiPV", &e.settings.multiPv, 1, 5);
   ImGui::SetItemTooltip("Number of best lines to analyse simultaneously");
-  ImGui::Checkbox(id("Pondering").c_str(), &s.ponder);
+  ImGui::Checkbox("Pondering", &e.settings.ponder);
   ImGui::SetItemTooltip("Engine thinks during opponent's turn");
 
   // Runtime status
@@ -238,58 +331,19 @@ void SettingsDialog::renderEngineSettings(const char       *label,
                        "Error: %s",
                        eng.lastError().c_str());
 
-  if (ImGui::Button(id("Start").c_str(), {80, 0}))
+  if (ImGui::Button("Start", {80, 0}))
     eng.start();
   ImGui::SameLine();
-  if (ImGui::Button(id("Stop").c_str(), {80, 0}))
+  if (ImGui::Button("Stop", {80, 0}))
     eng.stop();
   ImGui::SameLine();
-  if (ImGui::Button(id("Restart").c_str(), {80, 0}))
+  if (ImGui::Button("Restart", {80, 0}))
     eng.restart();
 
   renderEngineOptions(eng);
 }
 
-// ---------------------------------------------------------------------------
-void SettingsDialog::tabGeneral(AppContext &ctx) {
-  GameSettings &gs = ctx.settings;
-
-  ImGui::SeparatorText("Players");
-
-  const char *modes[] = {"Human", "Engine"};
-  int         red     = static_cast<int>(gs.redPlayer);
-  if (ImGui::Combo("Red (South)", &red, modes, 2))
-    gs.redPlayer = static_cast<PlayerMode>(red);
-
-  int blk = static_cast<int>(gs.blackPlayer);
-  if (ImGui::Combo("Black (North)", &blk, modes, 2))
-    gs.blackPlayer = static_cast<PlayerMode>(blk);
-}
-
-// ---------------------------------------------------------------------------
-void SettingsDialog::tabEngine(AppContext &ctx) {
-  GameSettings &gs = ctx.settings;
-
-  syncBuffers(gs);
-
-  renderEngineSettings("Red Engine",
-                       gs.engineRed,
-                       ctx.engineRed,
-                       pathBufRed_,
-                       sizeof(pathBufRed_),
-                       nameBufRed_,
-                       sizeof(nameBufRed_));
-  ImGui::Spacing();
-  renderEngineSettings("Black Engine",
-                       gs.engineBlack,
-                       ctx.engineBlack,
-                       pathBufBlack_,
-                       sizeof(pathBufBlack_),
-                       nameBufBlack_,
-                       sizeof(nameBufBlack_));
-}
-
-// ---------------------------------------------------------------------------
+// -----------------------------------------------------------------------
 void SettingsDialog::tabBoard(AppContext &ctx) {
   GameSettings &s = ctx.settings;
 
@@ -312,7 +366,7 @@ void SettingsDialog::tabBoard(AppContext &ctx) {
     ImGui::SliderFloat("Anim speed (ms)", &s.animSpeedMs, 40.f, 400.f, "%.0f");
 }
 
-// ---------------------------------------------------------------------------
+// -----------------------------------------------------------------------
 void SettingsDialog::tabColors(AppContext &ctx) {
   GameSettings &s = ctx.settings;
 

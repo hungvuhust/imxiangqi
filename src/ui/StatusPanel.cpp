@@ -1,6 +1,7 @@
 #include "StatusPanel.hpp"
 #include "../core/Board.hpp"
 #include "../core/MoveNotation.hpp"
+#include "../engine/EnginePool.hpp"
 #include <imgui.h>
 #include <sstream>
 #include <vector>
@@ -71,11 +72,15 @@ void StatusPanel::onRender(AppContext &ctx) {
   ImGui::TextColored({0.55f, 0.7f, 1.f, 1.f}, "  Black: %d", blackCount);
 
   // --- Engine analysis (PV) -----------------------------------------------
-  const auto &snapR = ctx.engineRed.analyzeSnapshot();
-  const auto &snapB = ctx.engineBlack.analyzeSnapshot();
-  const auto &snap  = snapR.pvLines.empty() ? snapB : snapR;
-  bool        isAnalyzing =
-      ctx.engineRed.isAnalyzing() || ctx.engineBlack.isAnalyzing();
+  EnginePool                  &pool = ctx.settings.pool;
+  EngineController            *engR = pool.redEngine();
+  EngineController            *engB = pool.blackEngine();
+  static const AnalyzeSnapshot kEmpty{};
+  const AnalyzeSnapshot       &snapR = engR ? engR->analyzeSnapshot() : kEmpty;
+  const AnalyzeSnapshot       &snapB = engB ? engB->analyzeSnapshot() : kEmpty;
+  const AnalyzeSnapshot       &snap  = snapR.pvLines.empty() ? snapB : snapR;
+  bool                         isAnalyzing =
+      (engR && engR->isAnalyzing()) || (engB && engB->isAnalyzing());
   if (isAnalyzing || !snap.pvLines.empty()) {
     ImGui::Separator();
     if (snap.depth >= 0)

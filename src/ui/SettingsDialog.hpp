@@ -1,16 +1,13 @@
 #pragma once
-#include "../engine/EngineTypes.hpp"
+#include "../engine/EnginePool.hpp"
 #include "AppContext.hpp"
 #include <string>
+#include <vector>
 
 namespace XiangQi {
 
 // -----------------------------------------------------------------------
-//  SettingsDialog  – modal popup chia tab: General | Engine | Board | Colors
-//
-//  Dùng:
-//    dialog.open();               // gọi từ menu bar
-//    dialog.render(ctx);          // gọi mỗi frame
+//  SettingsDialog  – modal popup: General | Engine | Board | Colors
 // -----------------------------------------------------------------------
 class SettingsDialog {
 public:
@@ -18,35 +15,26 @@ public:
   void render(AppContext &ctx);
 
 private:
-  bool pendingOpen_ = false;
+  bool pendingOpen_   = false;
+  bool confirmReset_  = false;
+  int  deleteConfirm_ = -1; // engine index pending delete confirm
 
-  // Engine tab buffers (Red)
-  char pathBufRed_[512]   = {};
-  char nameBufRed_[128]   = {};
-  // Engine tab buffers (Black)
-  char pathBufBlack_[512] = {};
-  char nameBufBlack_[128] = {};
-  bool bufInit_           = false;
+  // Per-engine text buffers (resized to match pool)
+  struct EngBufs {
+    char path[512] = {};
+    char name[128] = {};
+  };
+  std::vector<EngBufs> bufs_;
+  bool                 bufsInit_ = false;
 
-  // Reset confirm
-  bool confirmReset_ = false;
-
-  void syncBuffers(const GameSettings &s);
-  bool browseEnginePath(EngineSettings &s, char *pathBuf, size_t pathBufSize);
+  void syncBuffers(const EnginePool &pool);
 
   void tabGeneral(AppContext &ctx);
   void tabEngine(AppContext &ctx);
   void tabBoard(AppContext &ctx);
   void tabColors(AppContext &ctx);
 
-  // Helper: render settings for one engine side
-  void renderEngineSettings(const char       *label,
-                            EngineSettings   &s,
-                            EngineController &eng,
-                            char             *pathBuf,
-                            size_t            pathBufSize,
-                            char             *nameBuf,
-                            size_t            nameBufSize);
+  void renderOneEngine(int idx, AppContext &ctx);
 };
 
 } // namespace XiangQi

@@ -1,4 +1,5 @@
 #include "BoardPanel.hpp"
+#include "../engine/EnginePool.hpp"
 #include <algorithm>
 #include <imgui.h>
 
@@ -57,17 +58,19 @@ void BoardPanel::onRender(AppContext &ctx) {
     hintMove = ctx.hint->moveUcci;
 
   // Allow mouse input only when the current side-to-move is a Human player
-  PieceColor stm = ctx.gameState.sideToMove();
-  bool       allowInput =
-      (stm == PieceColor::Red ? ctx.settings.redPlayer == PlayerMode::Human
-                              : ctx.settings.blackPlayer == PlayerMode::Human);
+  // (i.e. no engine assigned to that side)
+  PieceColor stm        = ctx.gameState.sideToMove();
+  bool       isRed      = (stm == PieceColor::Red);
+  bool       allowInput = (ctx.settings.pool.activeEngineFor(isRed) == nullptr);
 
-  // Pass analyze snapshot only when actively analyzing (or snapshot non-empty)
-  // Analyze snapshot: dùng engine đang analyze (thường engineRed khi analyze
-  // mode)
-  const AnalyzeSnapshot &snapR = ctx.engineRed.analyzeSnapshot();
-  const AnalyzeSnapshot &snapB = ctx.engineBlack.analyzeSnapshot();
-  const AnalyzeSnapshot &snap  = snapR.pvLines.empty() ? snapB : snapR;
+  // Analyze snapshot: prefer Red engine, then Black, then first in pool
+  EnginePool                  &pool = ctx.settings.pool;
+  EngineController            *engR = pool.redEngine();
+  EngineController            *engB = pool.blackEngine();
+  static const AnalyzeSnapshot kEmpty{};
+  const AnalyzeSnapshot       &snapR = engR ? engR->analyzeSnapshot() : kEmpty;
+  const AnalyzeSnapshot       &snapB = engB ? engB->analyzeSnapshot() : kEmpty;
+  const AnalyzeSnapshot       &snap  = snapR.pvLines.empty() ? snapB : snapR;
   renderer_.render(ctx.gameState, hintMove, snap, allowInput);
 
   ImGui::End();

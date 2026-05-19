@@ -1,6 +1,8 @@
 #include "EngineLogPanel.hpp"
+#include "../engine/EnginePool.hpp"
 
 #include <imgui.h>
+#include <string>
 
 namespace XiangQi {
 
@@ -16,26 +18,35 @@ void EngineLogPanel::onRender(AppContext &ctx) {
     return;
   }
 
-  // Chọn engine để xem log
+  // Chọn engine để xem log – dùng tất cả engine trong pool
+  EnginePool &pool = ctx.settings.pool;
   if (ImGui::BeginTabBar("##eng-log-tabs")) {
-    struct TabInfo {
-      const char       *label;
-      EngineController *eng;
-    };
-    TabInfo tabs[] = {
-        {  "Red Engine",   &ctx.engineRed},
-        {"Black Engine", &ctx.engineBlack}
-    };
-    for (auto &t : tabs) {
-      if (ImGui::BeginTabItem(t.label)) {
-        activeLog_ = t.eng;
+    for (int i = 0; i < (int)pool.entries.size(); ++i) {
+      auto       &e     = pool.entries[i];
+      std::string label = e.displayName.empty()
+                              ? ("Engine " + std::to_string(i))
+                              : e.displayName;
+      // Đánh dấu phía được giao
+      if (pool.redIdx == i)
+        label += " [R]";
+      if (pool.blackIdx == i)
+        label += " [B]";
+      if (ImGui::BeginTabItem(label.c_str())) {
+        activeLog_ = e.ctrl.get();
         ImGui::EndTabItem();
       }
     }
     ImGui::EndTabBar();
   }
-  if (!activeLog_)
-    activeLog_ = &ctx.engineRed;
+  // Fallback: nếu chưa chọn hoặc pool rỗng
+  if (!activeLog_ && !pool.entries.empty())
+    activeLog_ = pool.entries[0].ctrl.get();
+
+  if (!activeLog_) {
+    ImGui::TextDisabled("No engines configured.");
+    ImGui::End();
+    return;
+  }
 
   if (ImGui::Button("Clear"))
     activeLog_->log().clear();

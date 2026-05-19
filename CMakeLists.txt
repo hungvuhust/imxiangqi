@@ -40,6 +40,7 @@ set(SOURCES
     src/engine/EngineProtocol.cpp
     src/engine/EngineProcess.cpp
     src/engine/EngineController.cpp
+    src/engine/EnginePool.cpp
     # ui panels
     src/ui/BoardPanel.cpp
     src/ui/EngineLogPanel.cpp
