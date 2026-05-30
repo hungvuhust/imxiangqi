@@ -438,7 +438,9 @@ private:
 
     // Configure + update all engines
     forEachEngine([&](EngineController &eng, int i) {
-      eng.configure(settings_.pool.entries[i].settings);
+      if (eng.configure(settings_.pool.entries[i].settings))
+        if (i < (int)pendingAnalyzeRestart_.size())
+          pendingAnalyzeRestart_[i] = true;
       eng.update(gameState_);
     });
 

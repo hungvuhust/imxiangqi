@@ -73,14 +73,18 @@ void StatusPanel::onRender(AppContext &ctx) {
 
   // --- Engine analysis (PV) -----------------------------------------------
   EnginePool                  &pool = ctx.settings.pool;
-  EngineController            *engR = pool.redEngine();
-  EngineController            *engB = pool.blackEngine();
   static const AnalyzeSnapshot kEmpty{};
-  const AnalyzeSnapshot       &snapR = engR ? engR->analyzeSnapshot() : kEmpty;
-  const AnalyzeSnapshot       &snapB = engB ? engB->analyzeSnapshot() : kEmpty;
-  const AnalyzeSnapshot       &snap  = snapR.pvLines.empty() ? snapB : snapR;
-  bool                         isAnalyzing =
-      (engR && engR->isAnalyzing()) || (engB && engB->isAnalyzing());
+  const AnalyzeSnapshot       *snapPtr     = &kEmpty;
+  bool                         isAnalyzing = false;
+  for (auto &e : pool.entries) {
+    if (!e.ctrl)
+      continue;
+    if (e.ctrl->isAnalyzing())
+      isAnalyzing = true;
+    if (snapPtr->pvLines.empty() && !e.ctrl->analyzeSnapshot().pvLines.empty())
+      snapPtr = &e.ctrl->analyzeSnapshot();
+  }
+  const AnalyzeSnapshot &snap = *snapPtr;
   if (isAnalyzing || !snap.pvLines.empty()) {
     ImGui::Separator();
     if (snap.depth >= 0)

@@ -6,8 +6,12 @@
 
 namespace XiangQi {
 
-void EngineController::configure(const EngineSettings &settings) {
-  settings_ = settings;
+bool EngineController::configure(const EngineSettings &settings) {
+  bool needRestart = isAnalyzing() && (settings.multiPv != settings_.multiPv);
+  settings_        = settings;
+  if (needRestart)
+    stopAnalyze();
+  return needRestart;
 }
 
 bool EngineController::start() {

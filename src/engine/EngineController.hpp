@@ -17,7 +17,8 @@ class EngineController {
 public:
   EngineController() = default;
 
-  void configure(const EngineSettings &settings);
+  bool configure(
+      const EngineSettings &settings); // returns true if analyze restart needed
 
   bool start();
   void stop();

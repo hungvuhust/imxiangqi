@@ -63,15 +63,17 @@ void BoardPanel::onRender(AppContext &ctx) {
   bool       isRed      = (stm == PieceColor::Red);
   bool       allowInput = (ctx.settings.pool.activeEngineFor(isRed) == nullptr);
 
-  // Analyze snapshot: prefer Red engine, then Black, then first in pool
+  // Analyze snapshot: first engine in pool with non-empty PV lines
   EnginePool                  &pool = ctx.settings.pool;
-  EngineController            *engR = pool.redEngine();
-  EngineController            *engB = pool.blackEngine();
   static const AnalyzeSnapshot kEmpty{};
-  const AnalyzeSnapshot       &snapR = engR ? engR->analyzeSnapshot() : kEmpty;
-  const AnalyzeSnapshot       &snapB = engB ? engB->analyzeSnapshot() : kEmpty;
-  const AnalyzeSnapshot       &snap  = snapR.pvLines.empty() ? snapB : snapR;
-  renderer_.render(ctx.gameState, hintMove, snap, allowInput);
+  const AnalyzeSnapshot       *snap = &kEmpty;
+  for (auto &e : pool.entries) {
+    if (e.ctrl && !e.ctrl->analyzeSnapshot().pvLines.empty()) {
+      snap = &e.ctrl->analyzeSnapshot();
+      break;
+    }
+  }
+  renderer_.render(ctx.gameState, hintMove, *snap, allowInput);
 
   ImGui::End();
   ImGui::PopStyleVar();

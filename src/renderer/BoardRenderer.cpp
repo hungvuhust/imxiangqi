@@ -342,8 +342,8 @@ void BoardRenderer::drawHintArrow(
 
   ImVec2 shaftEnd = {base.x - n.x * 2.0f, base.y - n.y * 2.0f};
 
-  ImU32 lineCol = IM_COL32(255, 190, 40, 235);
-  ImU32 tipCol  = IM_COL32(255, 145, 0, 245);
+  ImU32 lineCol = IM_COL32(220, 40, 40, 235);
+  ImU32 tipCol  = IM_COL32(180, 20, 20, 245);
 
   dl->AddLine(p0, shaftEnd, lineCol, thick);
   dl->AddTriangleFilled(tip, l, r, tipCol);
