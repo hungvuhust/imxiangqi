@@ -6,19 +6,48 @@
 #include <cstring>
 #include <filesystem>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <string>
 #include <vector>
 
 namespace {
 
-std::string defaultPickerPath(const std::string &enginePath) {
+// Colored status dot drawn via ImDrawList
+static void statusDot(ImVec2 pos, ImU32 col, float r = 5.f) {
+  ImGui::GetWindowDrawList()->AddCircleFilled(pos, r, col);
+}
+
+static ImU32 engineStateColor(XiangQi::EngineState s) {
+  using namespace XiangQi;
+  switch (s) {
+  case EngineState::Ready:
+  case EngineState::Thinking: return IM_COL32(60, 210, 100, 255); // green
+  case EngineState::Error: return IM_COL32(220, 60, 60, 255);     // red
+  case EngineState::Stopped: return IM_COL32(120, 120, 120, 255); // gray
+  default: return IM_COL32(210, 160, 40, 255);                    // amber
+  }
+}
+
+static const char *engineStateLabel(XiangQi::EngineState s) {
+  using namespace XiangQi;
+  switch (s) {
+  case EngineState::Ready: return "Ready";
+  case EngineState::Thinking: return "Thinking";
+  case EngineState::Handshaking: return "Connecting";
+  case EngineState::Starting: return "Starting";
+  case EngineState::Error: return "Error";
+  case EngineState::Stopped: return "Stopped";
+  default: return "Unknown";
+  }
+}
+
+static std::string defaultPickerPath(const std::string &enginePath) {
   if (enginePath.empty())
     return ".";
   std::filesystem::path p(enginePath);
   return p.has_parent_path() ? p.parent_path().string() : enginePath;
 }
 
-// Render engine dynamic options list; returns true if any dirty option
 static bool renderEngineOptions(XiangQi::EngineController &eng) {
   using namespace XiangQi;
   auto &opts = eng.engineOptions();
@@ -99,14 +128,15 @@ static bool renderEngineOptions(XiangQi::EngineController &eng) {
 
 namespace XiangQi {
 
-static constexpr const char *POPUP_ID = "Settings##modal";
+static constexpr float NAV_WIDTH = 140.f;
 
-void SettingsDialog::open() {
-  pendingOpen_ = true;
-  bufsInit_    = false;
+void SettingsDialog::open(int page) {
+  open_     = true;
+  bufsInit_ = false;
+  if (page >= 0)
+    currentPage_ = page;
 }
 
-// -----------------------------------------------------------------------
 void SettingsDialog::syncBuffers(const EnginePool &pool) {
   if (bufsInit_ && bufs_.size() == pool.entries.size())
     return;
@@ -123,164 +153,277 @@ void SettingsDialog::syncBuffers(const EnginePool &pool) {
   bufsInit_ = true;
 }
 
-// -----------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 void SettingsDialog::render(AppContext &ctx) {
-  if (pendingOpen_) {
-    ImGui::OpenPopup(POPUP_ID);
-    pendingOpen_ = false;
-  }
+  if (!open_)
+    return;
 
   ImVec2 center = ImGui::GetMainViewport()->GetCenter();
   ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, {0.5f, 0.5f});
-  ImGui::SetNextWindowSize({680, 560}, ImGuiCond_Appearing);
+  ImGui::SetNextWindowSize({720, 560}, ImGuiCond_Appearing);
+  ImGui::SetNextWindowSizeConstraints({500, 400}, {1200, 900});
 
-  if (!ImGui::BeginPopupModal(POPUP_ID, nullptr, ImGuiWindowFlags_NoResize))
+  ImGuiWindowFlags flags =
+      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoDocking;
+  if (!ImGui::Begin("Settings", &open_, flags)) {
+    ImGui::End();
     return;
-
-  if (ImGui::BeginTabBar("##settings_tabs")) {
-    if (ImGui::BeginTabItem("General")) {
-      tabGeneral(ctx);
-      ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("Engine")) {
-      tabEngine(ctx);
-      ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("Board")) {
-      tabBoard(ctx);
-      ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("Colors")) {
-      tabColors(ctx);
-      ImGui::EndTabItem();
-    }
-    ImGui::EndTabBar();
   }
 
-  ImGui::Separator();
+  // ── Left nav sidebar ────────────────────────────────────────────────────
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0.f, 8.f});
+  ImGui::BeginChild("##nav", {NAV_WIDTH, 0}, ImGuiChildFlags_Borders);
+  ImGui::PopStyleVar();
 
+  renderNav();
+  ImGui::EndChild();
+
+  ImGui::SameLine();
+
+  // ── Right content area ───────────────────────────────────────────────────
+  ImGui::BeginChild("##content", {0, 0}, ImGuiChildFlags_None);
+
+  switch (currentPage_) {
+  case 0: pageGeneral(ctx); break;
+  case 1: pageEngines(ctx); break;
+  case 2: pageAppearance(ctx); break;
+  }
+
+  ImGui::EndChild();
+
+  ImGui::End();
+}
+
+// ---------------------------------------------------------------------------
+void SettingsDialog::renderNav() {
+  struct NavItem {
+    const char *label;
+    const char *icon;
+  };
+  static const NavItem items[] = {
+      {   "General", "  "},
+      {   "Engines", "  "},
+      {"Appearance", "  "},
+  };
+
+  ImGui::Spacing();
+  ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, {0.08f, 0.5f});
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {4.f, 6.f});
+
+  for (int i = 0; i < 3; ++i) {
+    bool active = (currentPage_ == i);
+
+    if (active) {
+      ImGui::PushStyleColor(ImGuiCol_Header, ImVec4{0.22f, 0.47f, 0.72f, 1.f});
+      ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
+                            ImVec4{0.28f, 0.54f, 0.80f, 1.f});
+    }
+
+    char label[64];
+    std::snprintf(label, sizeof(label), "%s%s", items[i].icon, items[i].label);
+    if (ImGui::Selectable(label, active, ImGuiSelectableFlags_None, {0, 32}))
+      currentPage_ = i;
+
+    if (active)
+      ImGui::PopStyleColor(2);
+  }
+
+  ImGui::PopStyleVar(2);
+
+  // Footer: reset button at bottom of nav
+  float navH = ImGui::GetContentRegionAvail().y;
+  ImGui::SetCursorPosY(ImGui::GetCursorPosY() + navH - 60.f);
+  ImGui::Separator();
+  ImGui::Spacing();
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {4.f, 4.f});
+  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{0.35f, 0.15f, 0.15f, 1.f});
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                        ImVec4{0.55f, 0.20f, 0.20f, 1.f});
   if (!confirmReset_) {
-    if (ImGui::Button("Reset to defaults"))
+    if (ImGui::Button("Reset defaults", {-1, 0}))
       confirmReset_ = true;
   } else {
-    ImGui::TextColored({1.f, 0.4f, 0.2f, 1.f}, "Reset all settings?");
+    ImGui::TextColored({1.f, 0.5f, 0.3f, 1.f}, "Sure?");
     ImGui::SameLine();
-    if (ImGui::Button("Yes")) {
+    if (ImGui::SmallButton("Yes")) { /* handled in content */
+      confirmReset_ = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("No"))
+      confirmReset_ = false;
+  }
+  ImGui::PopStyleColor(2);
+  ImGui::PopStyleVar();
+}
+
+// ---------------------------------------------------------------------------
+void SettingsDialog::pageGeneral(AppContext &ctx) {
+  GameSettings &s = ctx.settings;
+
+  ImGui::SeparatorText("Board");
+  ImGui::SliderFloat("Piece scale", &s.pieceScale, 0.5f, 1.0f, "%.2f");
+  ImGui::Checkbox("Flip board", &s.flipBoard);
+  ImGui::Checkbox("Show coordinates", &s.showCoords);
+
+  ImGui::Spacing();
+  ImGui::SeparatorText("Animation");
+  ImGui::Checkbox("Animate moves", &s.animateMoves);
+  if (s.animateMoves)
+    ImGui::SliderFloat("Speed (ms)", &s.animSpeedMs, 40.f, 400.f, "%.0f");
+
+  if (confirmReset_) {
+    ImGui::Spacing();
+    ImGui::TextColored({1.f, 0.4f, 0.2f, 1.f},
+                       "Reset all settings to defaults?");
+    if (ImGui::Button("Yes, reset")) {
       ctx.settings.reset();
       bufsInit_     = false;
       confirmReset_ = false;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Cancel##reset"))
+    if (ImGui::Button("Cancel"))
       confirmReset_ = false;
   }
-
-  ImGui::SameLine(ImGui::GetContentRegionAvail().x - 50);
-  if (ImGui::Button("Close", {55, 0}))
-    ImGui::CloseCurrentPopup();
-
-  ImGui::EndPopup();
 }
 
-// -----------------------------------------------------------------------
-void SettingsDialog::tabGeneral(AppContext &ctx) {
-  ImGui::SeparatorText("Info");
-  ImGui::TextWrapped(
-      "Configure player assignments in the Controls panel "
-      "(left sidebar). Use the Engine tab to manage engine "
-      "instances.");
-  ImGui::Spacing();
-  ImGui::SeparatorText("Board");
-  ImGui::SliderFloat("Piece scale",
-                     &ctx.settings.pieceScale,
-                     0.5f,
-                     1.0f,
-                     "%.2f");
-  ImGui::Checkbox("Flip board", &ctx.settings.flipBoard);
-  ImGui::Checkbox("Show coordinates", &ctx.settings.showCoords);
-  ImGui::Checkbox("Animate moves", &ctx.settings.animateMoves);
-  if (ctx.settings.animateMoves)
-    ImGui::SliderFloat("Anim speed (ms)",
-                       &ctx.settings.animSpeedMs,
-                       40.f,
-                       400.f,
-                       "%.0f");
-}
-
-// -----------------------------------------------------------------------
-void SettingsDialog::tabEngine(AppContext &ctx) {
+// ---------------------------------------------------------------------------
+void SettingsDialog::pageEngines(AppContext &ctx) {
   EnginePool &pool = ctx.settings.pool;
   syncBuffers(pool);
 
-  // New Engine button
-  if (ImGui::Button("+ New Engine", {-1, 0})) {
+  if (ImGui::Button("+ Add Engine", {-1, 0})) {
     pool.addEngine();
-    bufsInit_ = false; // mark dirty so syncBuffers will re-init all slots
-    syncBuffers(pool); // re-sync immediately so bufs_ matches pool this frame
+    bufsInit_ = false;
+    syncBuffers(pool);
   }
-
   ImGui::Spacing();
 
   if (pool.entries.empty()) {
-    ImGui::TextDisabled(
-        "No engines configured. Click '+ New Engine' to add one.");
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4{0.6f, 0.6f, 0.6f, 1.f});
+    ImGui::TextWrapped("No engines configured. Add one to get started.");
+    ImGui::PopStyleColor();
     return;
   }
 
-  // Scrollable child for N engine panels
   ImGui::BeginChild("##engine-list", {0, 0}, false);
   for (int i = 0; i < (int)pool.entries.size(); ++i) {
     ImGui::PushID(i);
-    bool removed = renderOneEngine(i, ctx);
+    bool removed = renderEngineCard(i, ctx);
     ImGui::PopID();
     if (removed)
-      break; // bufs_ was invalidated; skip remaining this frame
+      break;
     ImGui::Spacing();
   }
   ImGui::EndChild();
 }
 
-// -----------------------------------------------------------------------
-// Returns true if the engine was removed (caller must break render loop).
-bool SettingsDialog::renderOneEngine(int idx, AppContext &ctx) {
+// ---------------------------------------------------------------------------
+void SettingsDialog::pageAppearance(AppContext &ctx) {
+  GameSettings &s = ctx.settings;
+
+  ImGui::SeparatorText("Theme");
+  int theme = static_cast<int>(s.theme);
+  if (ImGui::RadioButton("Classic", &theme, 0))
+    s.theme = BoardTheme::Classic;
+  ImGui::SameLine();
+  if (ImGui::RadioButton("Simple", &theme, 1))
+    s.theme = BoardTheme::Simple;
+
+  ImGui::Spacing();
+  ImGui::SeparatorText("Highlight Colors");
+
+  auto editColor = [](const char *label, GameSettings::Color4 &c) {
+    float arr[4] = {c.r, c.g, c.b, c.a};
+    if (ImGui::ColorEdit4(label,
+                          arr,
+                          ImGuiColorEditFlags_AlphaBar |
+                              ImGuiColorEditFlags_NoInputs))
+      c = {arr[0], arr[1], arr[2], arr[3]};
+  };
+  editColor("Selected piece", s.colSelected);
+  editColor("Legal move", s.colLegal);
+  editColor("Last move", s.colLastMove);
+  editColor("Check", s.colCheck);
+}
+
+// ---------------------------------------------------------------------------
+bool SettingsDialog::renderEngineCard(int idx, AppContext &ctx) {
   EnginePool        &pool = ctx.settings.pool;
   EnginePool::Entry &e    = pool.entries[idx];
   EngineController  &eng  = *e.ctrl;
   EngBufs           &buf  = bufs_[idx];
 
-  // Header with collapse + delete
-  std::string headerLabel =
-      std::string("Engine: ") + (e.displayName.empty()
-                                     ? ("Engine " + std::to_string(idx))
-                                     : e.displayName);
-  bool open = ImGui::CollapsingHeader(headerLabel.c_str(),
-                                      ImGuiTreeNodeFlags_DefaultOpen);
+  // ── Card border ─────────────────────────────────────────────────────────
+  float cardW = ImGui::GetContentRegionAvail().x;
+  ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.f);
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4{0.14f, 0.14f, 0.16f, 1.f});
+  ImGui::BeginChild("##card",
+                    {cardW, 0},
+                    ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_Borders);
+  ImGui::PopStyleColor();
+  ImGui::PopStyleVar();
 
-  // Delete button (right-aligned)
-  ImGui::SameLine(ImGui::GetContentRegionAvail().x - 30);
-  if (ImGui::SmallButton("X##del"))
+  // ── Card header row ──────────────────────────────────────────────────────
+  // Status dot
+  ImVec2 dotPos = {ImGui::GetCursorScreenPos().x + 8.f,
+                   ImGui::GetCursorScreenPos().y +
+                       ImGui::GetTextLineHeight() * 0.5f + 6.f};
+  ImGui::Dummy({18.f, 0.f}); // space for dot
+  ImGui::SameLine();
+
+  // Engine name (bold-ish via larger text or just regular)
+  std::string nameLabel =
+      e.displayName.empty() ? ("Engine " + std::to_string(idx)) : e.displayName;
+  ImGui::Text("%s", nameLabel.c_str());
+
+  // Draw status dot on top of dummy
+  statusDot(dotPos, engineStateColor(eng.state()), 5.f);
+
+  // State badge (right-aligned)
+  const char *stateStr = engineStateLabel(eng.state());
+  float       badgeX   = cardW - ImGui::CalcTextSize(stateStr).x - 80.f;
+  ImGui::SameLine(badgeX);
+  ImVec4 stateCol = (eng.state() == EngineState::Error)
+                        ? ImVec4{1.f, 0.4f, 0.4f, 1.f}
+                        : (eng.isRunning() ? ImVec4{0.4f, 0.85f, 0.55f, 1.f}
+                                           : ImVec4{0.6f, 0.6f, 0.6f, 1.f});
+  ImGui::TextColored(stateCol, "%s", stateStr);
+
+  // Delete button (top-right)
+  ImGui::SameLine(cardW - 30.f);
+  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{0.f, 0.f, 0.f, 0.f});
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                        ImVec4{0.6f, 0.15f, 0.15f, 1.f});
+  if (ImGui::SmallButton("✕##del"))
     deleteConfirm_ = idx;
+  ImGui::PopStyleColor(2);
 
+  ImGui::Separator();
+
+  // Delete confirm row
   if (deleteConfirm_ == idx) {
-    ImGui::TextColored({1.f, 0.4f, 0.2f, 1.f}, "Delete this engine?");
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4{1.f, 0.5f, 0.3f, 1.f});
+    ImGui::Text("Remove this engine?");
+    ImGui::PopStyleColor();
     ImGui::SameLine();
-    if (ImGui::SmallButton("Yes##delyes")) {
+    if (ImGui::SmallButton("Remove")) {
       pool.removeEngine(idx);
       bufsInit_ = false;
-      syncBuffers(pool); // resize bufs_ immediately so it stays valid
+      syncBuffers(pool);
       deleteConfirm_ = -1;
-      return true; // idx is now invalid; caller must break loop
+      ImGui::EndChild();
+      return true;
     }
     ImGui::SameLine();
-    if (ImGui::SmallButton("No##delno"))
+    if (ImGui::SmallButton("Keep"))
       deleteConfirm_ = -1;
+    ImGui::Separator();
   }
 
-  if (!open)
-    return false;
-
-  // Display name
-  if (ImGui::InputText("Display name",
+  // ── Display name ─────────────────────────────────────────────────────────
+  ImGui::SetNextItemWidth(-1.f);
+  if (ImGui::InputText("##name",
                        buf.name,
                        sizeof(buf.name),
                        ImGuiInputTextFlags_EnterReturnsTrue)) {
@@ -289,13 +432,15 @@ bool SettingsDialog::renderOneEngine(int idx, AppContext &ctx) {
     pool.ensureUniqueName(idx);
     std::strncpy(buf.name, e.displayName.c_str(), sizeof(buf.name) - 1);
   }
+  ImGui::SetItemTooltip("Display name");
 
-  // Engine path + browse
-  ImGui::SetNextItemWidth(-110);
-  if (ImGui::InputText("Engine path", buf.path, sizeof(buf.path)))
+  // ── Engine path row ───────────────────────────────────────────────────────
+  ImGui::SetNextItemWidth(-90.f);
+  if (ImGui::InputText("##path", buf.path, sizeof(buf.path)))
     e.settings.path = buf.path;
+  ImGui::SetItemTooltip("Path to engine binary");
   ImGui::SameLine();
-  if (ImGui::Button("Browse...", {100, 0})) {
+  if (ImGui::Button("Browse", {82, 0})) {
     pfd::open_file picker("Select engine binary",
                           defaultPickerPath(e.settings.path),
                           {"All Files", "*"},
@@ -304,7 +449,6 @@ bool SettingsDialog::renderOneEngine(int idx, AppContext &ctx) {
     if (!files.empty()) {
       std::strncpy(buf.path, files[0].c_str(), sizeof(buf.path) - 1);
       e.settings.path = buf.path;
-      // Auto-fill display name from filename if still empty
       if (e.displayName.empty()) {
         std::string stem = std::filesystem::path(files[0]).stem().string();
         std::strncpy(buf.name, stem.c_str(), sizeof(buf.name) - 1);
@@ -316,81 +460,66 @@ bool SettingsDialog::renderOneEngine(int idx, AppContext &ctx) {
     }
   }
 
-  ImGui::SliderInt("Depth", &e.settings.depth, 1, 30);
-  ImGui::SliderInt("Time (ms)", &e.settings.timeMs, 100, 10000);
-  ImGui::SliderInt("MultiPV", &e.settings.multiPv, 1, 5);
-  ImGui::SetItemTooltip("Number of best lines to analyse simultaneously");
-  ImGui::Checkbox("Pondering", &e.settings.ponder);
-  ImGui::SetItemTooltip("Engine thinks during opponent's turn");
-
-  // Runtime status
+  // ── Search parameters (2-column grid) ────────────────────────────────────
   ImGui::Spacing();
-  ImGui::Text("State: %s  Protocol: %s  %s",
-              toString(eng.state()),
-              toString(eng.protocol()),
-              eng.isRunning() ? "Running" : "Stopped");
-  if (!eng.engineIdName().empty())
+  if (ImGui::BeginTable("##params", 2, ImGuiTableFlags_None)) {
+    ImGui::TableNextColumn();
+    ImGui::SetNextItemWidth(-1.f);
+    ImGui::SliderInt("Depth##d", &e.settings.depth, 1, 30);
+
+    ImGui::TableNextColumn();
+    ImGui::SetNextItemWidth(-1.f);
+    ImGui::SliderInt("Time (ms)##t", &e.settings.timeMs, 100, 10000);
+
+    ImGui::TableNextColumn();
+    ImGui::SetNextItemWidth(-1.f);
+    ImGui::SliderInt("MultiPV##m", &e.settings.multiPv, 1, 5);
+    ImGui::SetItemTooltip("Number of best lines to analyse simultaneously");
+
+    ImGui::TableNextColumn();
+    ImGui::Checkbox("Pondering##p", &e.settings.ponder);
+    ImGui::SetItemTooltip("Engine thinks during opponent's turn");
+
+    ImGui::EndTable();
+  }
+
+  // ── Engine ID + error ─────────────────────────────────────────────────────
+  if (!eng.engineIdName().empty()) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4{0.55f, 0.55f, 0.55f, 1.f});
     ImGui::Text("ID: %s", eng.engineIdName().c_str());
+    ImGui::PopStyleColor();
+  }
   if (!eng.lastError().empty())
     ImGui::TextColored({1.f, 0.35f, 0.35f, 1.f},
-                       "Error: %s",
+                       "⚠  %s",
                        eng.lastError().c_str());
 
-  if (ImGui::Button("Start", {80, 0}))
+  // ── Control buttons ───────────────────────────────────────────────────────
+  ImGui::Spacing();
+  bool canStart = !eng.isRunning();
+  bool canStop  = eng.isRunning();
+  ImGui::BeginDisabled(!canStart);
+  if (ImGui::Button("Start", {70, 0}))
     eng.start();
+  ImGui::EndDisabled();
   ImGui::SameLine();
-  if (ImGui::Button("Stop", {80, 0}))
+  ImGui::BeginDisabled(!canStop);
+  if (ImGui::Button("Stop", {70, 0}))
     eng.stop();
+  ImGui::EndDisabled();
   ImGui::SameLine();
-  if (ImGui::Button("Restart", {80, 0}))
+  if (ImGui::Button("Restart", {70, 0}))
     eng.restart();
 
-  renderEngineOptions(eng);
+  // ── Advanced engine options (collapsible) ─────────────────────────────────
+  if (!eng.engineOptions().empty()) {
+    ImGui::Spacing();
+    renderEngineOptions(eng);
+  }
+
+  ImGui::Spacing();
+  ImGui::EndChild();
   return false;
-}
-
-// -----------------------------------------------------------------------
-void SettingsDialog::tabBoard(AppContext &ctx) {
-  GameSettings &s = ctx.settings;
-
-  ImGui::SeparatorText("Board & Pieces");
-
-  int theme = static_cast<int>(s.theme);
-  ImGui::Text("Theme:");
-  ImGui::SameLine();
-  if (ImGui::RadioButton("Classic", &theme, 0))
-    s.theme = BoardTheme::Classic;
-  ImGui::SameLine();
-  if (ImGui::RadioButton("Simple", &theme, 1))
-    s.theme = BoardTheme::Simple;
-
-  ImGui::SliderFloat("Piece scale", &s.pieceScale, 0.5f, 1.0f, "%.2f");
-  ImGui::Checkbox("Flip board", &s.flipBoard);
-  ImGui::Checkbox("Show coordinates", &s.showCoords);
-  ImGui::Checkbox("Animate moves", &s.animateMoves);
-  if (s.animateMoves)
-    ImGui::SliderFloat("Anim speed (ms)", &s.animSpeedMs, 40.f, 400.f, "%.0f");
-}
-
-// -----------------------------------------------------------------------
-void SettingsDialog::tabColors(AppContext &ctx) {
-  GameSettings &s = ctx.settings;
-
-  ImGui::SeparatorText("Highlight Colors");
-
-  auto editColor = [](const char *label, GameSettings::Color4 &c) {
-    float arr[4] = {c.r, c.g, c.b, c.a};
-    if (ImGui::ColorEdit4(label,
-                          arr,
-                          ImGuiColorEditFlags_AlphaBar |
-                              ImGuiColorEditFlags_NoInputs))
-      c = {arr[0], arr[1], arr[2], arr[3]};
-  };
-
-  editColor("Selected piece", s.colSelected);
-  editColor("Legal move", s.colLegal);
-  editColor("Last move", s.colLastMove);
-  editColor("Check", s.colCheck);
 }
 
 } // namespace XiangQi

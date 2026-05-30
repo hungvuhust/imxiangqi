@@ -204,7 +204,9 @@ private:
     panels_.emplace_back(std::make_unique<StatusPanel>());
     panels_.emplace_back(std::make_unique<MoveHistoryPanel>());
 
-    panels_.emplace_back(std::make_unique<EngineLogPanel>());
+    auto logPanel = std::make_unique<EngineLogPanel>();
+    logPanel->setOpen(false); // hidden by default, open via View menu
+    panels_.emplace_back(std::move(logPanel));
     return true;
   }
 
@@ -512,8 +514,10 @@ private:
       if (ImGui::MenuItem("Save layout as default")) {
         ImGui::SaveIniSettingsToDisk("imgui.ini");
       }
-      if (ImGui::MenuItem("Reset layout"))
+      if (ImGui::MenuItem("Reset layout")) {
+        std::filesystem::remove("imgui.ini");
         dockLayoutBuilt_ = false;
+      }
       ImGui::EndMenu();
     }
 
@@ -570,41 +574,36 @@ private:
     ImGuiViewport *vp = ImGui::GetMainViewport();
     ImGui::DockBuilderSetNodeSize(dockId, vp->Size);
 
-    ImGuiID leftId, rightId;
+    // Left sidebar (Controls) | Center (Board) | Right sidebar (Status +
+    // History)
+    ImGuiID leftId, remainId;
     ImGui::DockBuilderSplitNode(dockId,
                                 ImGuiDir_Left,
-                                0.70f,
+                                0.16f,
                                 &leftId,
-                                &rightId);
+                                &remainId);
 
-    ImGuiID boardId, historyId;
-    ImGui::DockBuilderSplitNode(leftId,
-                                ImGuiDir_Up,
-                                0.75f,
-                                &boardId,
-                                &historyId);
+    // Right = 26% of total → 26/84 ≈ 0.31 of remainId
+    ImGuiID centerId, rightId;
+    ImGui::DockBuilderSplitNode(remainId,
+                                ImGuiDir_Right,
+                                0.31f,
+                                &rightId,
+                                &centerId);
 
-    ImGuiID rightTopId, settingsId;
+    // Right sidebar: Status top 38%, Move History bottom 62%
+    ImGuiID statusId, historyId;
     ImGui::DockBuilderSplitNode(rightId,
                                 ImGuiDir_Up,
-                                0.60f,
-                                &rightTopId,
-                                &settingsId);
+                                0.38f,
+                                &statusId,
+                                &historyId);
 
-    ImGuiID controlsId, statusId;
-    ImGui::DockBuilderSplitNode(rightTopId,
-                                ImGuiDir_Up,
-                                0.50f,
-                                &controlsId,
-                                &statusId);
-
-    ImGui::DockBuilderDockWindow("Board", boardId);
-    ImGui::DockBuilderDockWindow("Move History", historyId);
-    ImGui::DockBuilderDockWindow("Controls", controlsId);
+    ImGui::DockBuilderDockWindow("Board", centerId);
+    ImGui::DockBuilderDockWindow("Controls", leftId);
     ImGui::DockBuilderDockWindow("Status", statusId);
-    ImGui::DockBuilderDockWindow("Settings", settingsId);
-    ImGui::DockBuilderDockWindow("Engine Settings", settingsId);
-    ImGui::DockBuilderDockWindow("Engine Log", settingsId);
+    ImGui::DockBuilderDockWindow("Move History", historyId);
+    // Engine Log: not docked — opens as floating window via View menu
 
     ImGui::DockBuilderFinish(dockId);
   }

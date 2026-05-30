@@ -6,20 +6,17 @@
 
 namespace XiangQi {
 
-// -----------------------------------------------------------------------
-//  SettingsDialog  – modal popup: General | Engine | Board | Colors
-// -----------------------------------------------------------------------
 class SettingsDialog {
 public:
-  void open();
+  void open(int page = -1); // -1 = keep current page
   void render(AppContext &ctx);
 
 private:
-  bool pendingOpen_   = false;
+  bool open_          = false;
   bool confirmReset_  = false;
-  int  deleteConfirm_ = -1; // engine index pending delete confirm
+  int  deleteConfirm_ = -1;
+  int  currentPage_   = 1; // 0=General 1=Engines 2=Appearance
 
-  // Per-engine text buffers (resized to match pool)
   struct EngBufs {
     char path[512] = {};
     char name[128] = {};
@@ -28,14 +25,13 @@ private:
   bool                 bufsInit_ = false;
 
   void syncBuffers(const EnginePool &pool);
+  void renderNav();
+  void pageGeneral(AppContext &ctx);
+  void pageEngines(AppContext &ctx);
+  void pageAppearance(AppContext &ctx);
 
-  void tabGeneral(AppContext &ctx);
-  void tabEngine(AppContext &ctx);
-  void tabBoard(AppContext &ctx);
-  void tabColors(AppContext &ctx);
-
-  // Returns true if the engine at idx was removed (caller must break loop).
-  bool renderOneEngine(int idx, AppContext &ctx);
+  // Returns true if engine was removed (caller must break loop).
+  bool renderEngineCard(int idx, AppContext &ctx);
 };
 
 } // namespace XiangQi
