@@ -1,5 +1,6 @@
 #include "EngineLogPanel.hpp"
 #include "../engine/EnginePool.hpp"
+#include "../font_awesome_icons.hpp"
 
 #include <imgui.h>
 #include <string>
@@ -48,7 +49,7 @@ void EngineLogPanel::onRender(AppContext &ctx) {
     return;
   }
 
-  if (ImGui::Button("Clear"))
+  if (ImGui::Button(ICON_FA_TRASH " Clear"))
     activeLog_->log().clear();
   ImGui::SameLine();
   ImGui::Checkbox("Auto-scroll", &autoScroll_);

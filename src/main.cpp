@@ -22,6 +22,9 @@
 #include "ui/SettingsDialog.hpp"
 #include "ui/StatusPanel.hpp"
 
+#include "font_awesome.hpp"
+#include "font_awesome_icons.hpp"
+
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -89,6 +92,8 @@ private:
   int               gameEventListenerId_ = -1;
   // per-engine pending analyze restart flags (indexed like pool.entries)
   std::vector<bool> pendingAnalyzeRestart_;
+  // set when analysis is stopped so engine can play; restart after MoveMade
+  std::vector<bool> resumeAnalyzeAfterMove_;
 
   // Khi engine mode: giữ nước đi lại 500ms để hint arrow hiển thị trước
   std::string                           pendingEngineMove_;
@@ -195,6 +200,18 @@ private:
               "[App] Warning: failed to load Roboto font from %s\n",
               fontPath.c_str());
 
+    // Merge Font Awesome icons into the same font atlas
+    static const ImWchar fa_ranges[] = {ICON_MIN_FA, ICON_MAX_FA, 0};
+    ImFontConfig         fa_cfg;
+    fa_cfg.MergeMode        = true;
+    fa_cfg.PixelSnapH       = true;
+    fa_cfg.GlyphMinAdvanceX = 14.0f; // monospace width for icons
+    io.Fonts->AddFontFromMemoryCompressedTTF(font_awesome_data,
+                                             (int)font_awesome_size,
+                                             13.0f,
+                                             &fa_cfg,
+                                             fa_ranges);
+
     return true;
   }
 
@@ -228,6 +245,7 @@ private:
 
   void syncPendingAnalyzeRestart() {
     pendingAnalyzeRestart_.resize(settings_.pool.entries.size(), false);
+    resumeAnalyzeAfterMove_.resize(settings_.pool.entries.size(), false);
   }
 
   void onGameEvent(const GameEvent &ev) {
@@ -239,10 +257,15 @@ private:
       lastHint_.reset();
       forEachEngine([&](EngineController &eng, int i) {
         eng.clearSnapshot();
+        bool resume = i < (int)resumeAnalyzeAfterMove_.size() &&
+                      resumeAnalyzeAfterMove_[i];
+        if (i < (int)resumeAnalyzeAfterMove_.size())
+          resumeAnalyzeAfterMove_[i] = false;
         if (eng.isAnalyzing()) {
           eng.stopAnalyze();
-          if (i < (int)pendingAnalyzeRestart_.size())
-            pendingAnalyzeRestart_[i] = true;
+          pendingAnalyzeRestart_[i] = true;
+        } else if (resume) {
+          pendingAnalyzeRestart_[i] = true;
         }
       });
       break;
@@ -400,6 +423,21 @@ private:
       eng->sendPonderHit();
       return;
     }
+
+    // If engine is analyzing, stop it so it can play; restart after move
+    if (eng->isAnalyzing()) {
+      auto &entries = settings_.pool.entries;
+      for (int i = 0; i < (int)entries.size(); ++i) {
+        if (entries[i].ctrl.get() == eng &&
+            i < (int)resumeAnalyzeAfterMove_.size()) {
+          resumeAnalyzeAfterMove_[i] = true;
+          break;
+        }
+      }
+      eng->stopAnalyze();
+      return; // wait for Ready next frame
+    }
+
     if (!eng->isReady() || eng->isThinking())
       return;
 

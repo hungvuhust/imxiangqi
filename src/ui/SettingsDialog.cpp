@@ -1,5 +1,6 @@
 #include "SettingsDialog.hpp"
 
+#include "../font_awesome_icons.hpp"
 #include <portable-file-dialogs.h>
 
 #include <cstdio>
@@ -118,7 +119,7 @@ static bool renderEngineOptions(XiangQi::EngineController &eng) {
   }
   if (anyDirty) {
     ImGui::Spacing();
-    if (ImGui::Button("Apply options", {-1, 0}))
+    if (ImGui::Button(ICON_FA_CHECK " Apply options", {-1, 0}))
       eng.flushDirtyOptions();
   }
   return anyDirty;
@@ -201,9 +202,9 @@ void SettingsDialog::renderNav() {
     const char *icon;
   };
   static const NavItem items[] = {
-      {   "General", "  "},
-      {   "Engines", "  "},
-      {"Appearance", "  "},
+      {   "General", ICON_FA_SLIDERS " "},
+      {   "Engines",  ICON_FA_WRENCH " "},
+      {"Appearance",     ICON_FA_EYE " "},
   };
 
   ImGui::Spacing();
@@ -291,7 +292,7 @@ void SettingsDialog::pageEngines(AppContext &ctx) {
   EnginePool &pool = ctx.settings.pool;
   syncBuffers(pool);
 
-  if (ImGui::Button("+ Add Engine", {-1, 0})) {
+  if (ImGui::Button(ICON_FA_PLUS " Add Engine", {-1, 0})) {
     pool.addEngine();
     bufsInit_ = false;
     syncBuffers(pool);
@@ -395,7 +396,7 @@ bool SettingsDialog::renderEngineCard(int idx, AppContext &ctx) {
   ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{0.f, 0.f, 0.f, 0.f});
   ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
                         ImVec4{0.6f, 0.15f, 0.15f, 1.f});
-  if (ImGui::SmallButton("✕##del"))
+  if (ImGui::SmallButton(ICON_FA_XMARK "##del"))
     deleteConfirm_ = idx;
   ImGui::PopStyleColor(2);
 
@@ -440,7 +441,7 @@ bool SettingsDialog::renderEngineCard(int idx, AppContext &ctx) {
     e.settings.path = buf.path;
   ImGui::SetItemTooltip("Path to engine binary");
   ImGui::SameLine();
-  if (ImGui::Button("Browse", {82, 0})) {
+  if (ImGui::Button(ICON_FA_FOLDER " Browse", {96, 0})) {
     pfd::open_file picker("Select engine binary",
                           defaultPickerPath(e.settings.path),
                           {"All Files", "*"},
@@ -499,16 +500,16 @@ bool SettingsDialog::renderEngineCard(int idx, AppContext &ctx) {
   bool canStart = !eng.isRunning();
   bool canStop  = eng.isRunning();
   ImGui::BeginDisabled(!canStart);
-  if (ImGui::Button("Start", {70, 0}))
+  if (ImGui::Button(ICON_FA_PLAY " Start", {88, 0}))
     eng.start();
   ImGui::EndDisabled();
   ImGui::SameLine();
   ImGui::BeginDisabled(!canStop);
-  if (ImGui::Button("Stop", {70, 0}))
+  if (ImGui::Button(ICON_FA_STOP " Stop", {80, 0}))
     eng.stop();
   ImGui::EndDisabled();
   ImGui::SameLine();
-  if (ImGui::Button("Restart", {70, 0}))
+  if (ImGui::Button(ICON_FA_ROTATE " Restart", {100, 0}))
     eng.restart();
 
   // ── Advanced engine options (collapsible) ─────────────────────────────────

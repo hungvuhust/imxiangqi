@@ -1,5 +1,6 @@
 #include "ControlPanel.hpp"
 #include "../engine/EnginePool.hpp"
+#include "../font_awesome_icons.hpp"
 #include <cstring>
 #include <imgui.h>
 #include <vector>
@@ -52,12 +53,12 @@ void ControlPanel::onRender(AppContext &ctx) {
   // --- Game actions -------------------------------------------------------
   ImGui::SeparatorText("Game");
 
-  if (ImGui::Button("New Game", {-1, 0}))
+  if (ImGui::Button(ICON_FA_FLAG " New Game", {-1, 0}))
     ctx.newGame();
 
   bool canUndo = ctx.gameState.canUndo() && !ctx.gameState.isGameOver();
   ImGui::BeginDisabled(!canUndo);
-  if (ImGui::Button("Undo", {-1, 0}))
+  if (ImGui::Button(ICON_FA_ARROW_LEFT " Undo", {-1, 0}))
     ctx.undoMove();
   ImGui::EndDisabled();
 
@@ -67,12 +68,17 @@ void ControlPanel::onRender(AppContext &ctx) {
   EngineController *activeEng   = ctx.activeEngine();
   bool              engineReady = activeEng && activeEng->isReady();
 
-  // Hint button (engine của bên đang đến lượt)
-  bool canHint =
-      engineReady && ctx.gameState.isPlaying() && !activeEng->isThinking();
+  // Hint: dùng bất kỳ engine nào sẵn sàng (không cần phải là bên đang đi)
+  EngineController *hintEng = nullptr;
+  for (auto &e : ctx.settings.pool.entries)
+    if (e.ctrl && e.ctrl->isReady()) {
+      hintEng = e.ctrl.get();
+      break;
+    }
+  bool canHint = hintEng && ctx.gameState.isPlaying();
   ImGui::BeginDisabled(!canHint);
-  if (ImGui::Button("Hint next move", {-1, 0}))
-    activeEng->requestHint(ctx.gameState);
+  if (ImGui::Button(ICON_FA_LIGHTBULB " Hint", {-1, 0}))
+    hintEng->requestHint(ctx.gameState);
   ImGui::EndDisabled();
 
   if (ctx.hint.has_value()) {
@@ -100,10 +106,10 @@ void ControlPanel::onRender(AppContext &ctx) {
     bool canAnalyze = analyzeEng->isReady() || analyzing;
     ImGui::BeginDisabled(!canAnalyze);
     if (!analyzing) {
-      if (ImGui::Button("Start Analysis", {-1, 0}))
+      if (ImGui::Button(ICON_FA_PLAY " Start Analysis", {-1, 0}))
         analyzeEng->startAnalyze(ctx.gameState);
     } else {
-      if (ImGui::Button("Stop Analysis", {-1, 0}))
+      if (ImGui::Button(ICON_FA_STOP " Stop Analysis", {-1, 0}))
         analyzeEng->stopAnalyze();
     }
     ImGui::EndDisabled();
@@ -132,7 +138,7 @@ void ControlPanel::onRender(AppContext &ctx) {
     fenError_ = false;
   }
 
-  if (ImGui::Button("Load", {-1, 0})) {
+  if (ImGui::Button(ICON_FA_UPLOAD " Load FEN", {-1, 0})) {
     if (std::strlen(fenBuf_) > 0) {
       ctx.loadFen(fenBuf_);
       fenError_ = false;
@@ -143,7 +149,7 @@ void ControlPanel::onRender(AppContext &ctx) {
   if (fenError_)
     ImGui::TextColored({1, 0.3f, 0.3f, 1}, "Invalid or empty FEN.");
 
-  if (ImGui::Button("Copy current FEN", {-1, 0}))
+  if (ImGui::Button(ICON_FA_COPY " Copy FEN", {-1, 0}))
     ImGui::SetClipboardText(ctx.gameState.toFen().c_str());
 
   ImGui::End();
